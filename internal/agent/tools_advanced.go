@@ -311,12 +311,16 @@ func executeTest(input json.RawMessage, workDir string) (string, bool) {
 	}
 
 	cmd.Dir = workDir
+	cmd.Env = os.Environ()
 	out, err := cmd.CombinedOutput()
-	result := string(out)
+	result := strings.TrimSpace(string(out))
+	if result == "" {
+		result = "No test output (possibly no test files)"
+	}
 	if len(result) > 50000 {
 		result = result[:50000] + "\n... (truncated)"
 	}
-	if err != nil {
+	if err != nil && result != "No test output (possibly no test files)" {
 		return result + "\n[tests failed]", true
 	}
 	return result, false

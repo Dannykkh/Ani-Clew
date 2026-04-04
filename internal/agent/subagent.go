@@ -138,7 +138,9 @@ func (m *SubAgentManager) run(task *SubAgentTask) {
 	defer cancel()
 
 	// Build sub-agent system prompt
-	sysPrompt := fmt.Sprintf(`You are a sub-agent named "%s" working on a specific task.
+	// Note: /no_think disables qwen3's reasoning mode for direct output
+	sysPrompt := fmt.Sprintf(`/no_think
+You are a sub-agent named "%s" working on a specific task.
 You have access to tools: Bash, Read, Write, Edit, Glob, Grep, Git, LS.
 You ONLY work on these files: %s
 Do NOT modify files outside your assigned scope.
