@@ -169,6 +169,10 @@ func (s *Server) Start() error {
 	mux.HandleFunc("GET /api/plan", s.handlePlanGet)
 	mux.HandleFunc("POST /api/plan/approve", s.handlePlanApprove)
 
+	// Sub-agents
+	mux.HandleFunc("POST /api/subagent/spawn", s.handleSubAgentSpawn)
+	mux.HandleFunc("GET /api/subagent/tasks", s.handleSubAgentTasks)
+
 	// MCP servers
 	mux.HandleFunc("GET /api/mcp", s.handleMCPList)
 	mux.HandleFunc("POST /api/mcp/connect", s.handleMCPConnect)
@@ -596,6 +600,54 @@ func (d *Server) handleKairosAutonomy(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(r.Body).Decode(&body)
 	daemon.SetAutonomy(body.Mode)
 	writeJSON(w, map[string]any{"ok": true, "autonomy": body.Mode})
+}
+
+// ── Sub-agents ──
+
+var subAgentMgr *agent.SubAgentManager
+
+func (s *Server) handleSubAgentSpawn(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	provider := s.activeProvider
+	model := s.activeModel
+	s.mu.RUnlock()
+
+	var body struct {
+		Tasks []struct {
+			Name        string   `json:"name"`
+			Instruction string   `json:"instruction"`
+			Files       []string `json:"files"`
+		} `json:"tasks"`
+		WorkDir string `json:"workDir"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, 400, "Invalid JSON")
+		return
+	}
+
+	workDir := body.WorkDir
+	if workDir == "" {
+		workDir, _ = os.Getwd()
+	}
+
+	if subAgentMgr == nil {
+		subAgentMgr = agent.NewSubAgentManager(provider, model, workDir)
+	}
+
+	var spawned []map[string]string
+	for _, t := range body.Tasks {
+		task := subAgentMgr.Spawn(t.Name, t.Instruction, t.Files)
+		spawned = append(spawned, map[string]string{"id": task.ID, "name": task.Name, "status": task.Status})
+	}
+	writeJSON(w, map[string]any{"spawned": len(spawned), "tasks": spawned})
+}
+
+func (s *Server) handleSubAgentTasks(w http.ResponseWriter, _ *http.Request) {
+	if subAgentMgr == nil {
+		writeJSON(w, []any{})
+		return
+	}
+	writeJSON(w, subAgentMgr.GetTasks())
 }
 
 // ── Slash Commands ──
