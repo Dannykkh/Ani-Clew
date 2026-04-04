@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/aniclew/aniclew/internal/types"
@@ -84,15 +85,21 @@ func RunLoop(
 				eventCh <- Event{Type: "error", Data: err.Error()}
 				return
 			}
+			// Direct output commands — don't send to LLM
 			if processed == "[CLEAR_CHAT]" || processed == "[SHOW_MODEL_SELECTOR]" {
 				eventCh <- Event{Type: "command", Data: processed}
 				return
 			}
 			if processed == "[COMPACT_CONTEXT]" {
 				eventCh <- Event{Type: "status", Data: "Compressing context..."}
-				// Context compression will happen naturally below
 			}
-			// Replace last message with processed prompt
+			// /help → return directly, no LLM needed
+			if strings.HasPrefix(lastText, "/help") {
+				eventCh <- Event{Type: "text", Data: processed}
+				eventCh <- Event{Type: "done", Data: nil}
+				return
+			}
+			// Replace last message with processed skill prompt
 			messages[len(messages)-1] = types.Message{
 				Role:    "user",
 				Content: mustJSON(processed),
