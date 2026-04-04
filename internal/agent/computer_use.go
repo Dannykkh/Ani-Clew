@@ -323,7 +323,7 @@ func executeFileManager(input json.RawMessage, workDir string) (string, bool) {
 		}
 		cmd := exec.Command("cp", "-r", src, dst)
 		if runtime.GOOS == "windows" {
-			cmd = exec.Command("xcopy", src, dst, "/E", "/I", "/Y")
+			cmd = exec.Command("cmd", "/c", "copy", "/Y", strings.ReplaceAll(src, "/", "\\"), strings.ReplaceAll(dst, "/", "\\"))
 		}
 		out, err := cmd.CombinedOutput()
 		if err != nil {
