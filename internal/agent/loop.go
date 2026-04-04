@@ -60,7 +60,12 @@ func RunLoop(
 	copy(messages, userMessages)
 	tools := AllToolDefs(workDir)
 
-	maxIterations := 20
+	maxIterations := 25 // increased from 20
+
+	// ── Detect project type ──
+	project := DetectProject(workDir)
+	projectPrompt := project.ToPrompt()
+	eventCh <- Event{Type: "status", Data: fmt.Sprintf("Project: %s (%s, %d files)", project.Name, project.Type, project.FileCount)}
 
 	// ── Load project context (CLAUDE.md, AGENTS.md, skills) ──
 	projectCtx := LoadProjectContext(workDir)
@@ -151,7 +156,7 @@ func RunLoop(
 		}
 
 		// Build request with full context
-		sysPrompt := buildSystemPrompt(responseLang) + projectCtx + skillText
+		sysPrompt := buildSystemPrompt(responseLang) + projectPrompt + projectCtx + skillText
 		req := &types.MessagesRequest{
 			Model:    model,
 			System:   mustJSON([]map[string]string{{"type": "text", "text": sysPrompt}}),

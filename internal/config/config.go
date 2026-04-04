@@ -19,6 +19,9 @@ type Config struct {
 	RouterEnabled   bool                        `json:"routerEnabled"`
 	ResponseLang    string                      `json:"responseLang"`    // "ko", "en", "ja", "zh", "auto"
 	UILang          string                      `json:"uiLang"`          // "ko", "en"
+	SkillDirs       []string                    `json:"skillDirs"`       // custom skill directories
+	MCPConfigPaths  []string                    `json:"mcpConfigPaths"`  // extra MCP config file paths
+	WorkDir         string                      `json:"workDir"`         // default workspace
 	Providers       map[string]ProviderSettings  `json:"providers"`
 }
 

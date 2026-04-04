@@ -735,8 +735,26 @@ func (s *Server) handleSkillsList(w http.ResponseWriter, r *http.Request) {
 	if workDir == "" {
 		workDir, _ = os.Getwd()
 	}
-	skills := agent.LoadSkills(workDir)
-	writeJSON(w, skills)
+	skills := agent.LoadSkillsWithConfig(workDir, nil)
+
+	type skillInfo struct {
+		Name   string `json:"name"`
+		Path   string `json:"path"`
+		Source string `json:"source"`
+	}
+	var result []skillInfo
+	for _, sk := range skills {
+		source := "custom"
+		if strings.Contains(sk.Path, ".claude") {
+			source = "claude"
+		} else if strings.Contains(sk.Path, ".codex") {
+			source = "codex"
+		} else if strings.Contains(sk.Path, ".gemini") {
+			source = "gemini"
+		}
+		result = append(result, skillInfo{Name: sk.Name, Path: sk.Path, Source: source})
+	}
+	writeJSON(w, result)
 }
 
 // ── Session Management ──
