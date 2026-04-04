@@ -251,11 +251,12 @@ func executeLint(input json.RawMessage, workDir string) (string, bool) {
 	cmd.Dir = workDir
 	out, err := cmd.CombinedOutput()
 	result := strings.TrimSpace(string(out))
-	if result == "" {
-		result = "No lint issues found."
+
+	if err != nil && result != "" {
+		return result, true // lint found issues
 	}
-	if err != nil {
-		return result + "\n[lint errors found]", true
+	if result == "" {
+		return "No lint issues found. ✅", false
 	}
 	return result, false
 }
