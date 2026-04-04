@@ -140,6 +140,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc("GET /api/browse", s.handleBrowseFolder)
 	mux.HandleFunc("PUT /api/workspace", s.handleSetWorkspace)
 	mux.HandleFunc("GET /api/workspace", s.handleGetWorkspace)
+	mux.HandleFunc("GET /api/file", s.handleReadFile)
+	mux.HandleFunc("GET /api/tree", s.handleFileTree)
 	mux.HandleFunc("PUT /api/config", s.handleSetConfig)
 	mux.HandleFunc("GET /api/routes", s.handleGetRoutes)
 	mux.HandleFunc("PUT /api/routes", s.handleSetRoute)
@@ -500,6 +502,167 @@ func (s *Server) handleGetWorkspace(w http.ResponseWriter, _ *http.Request) {
 		"path":    wd,
 		"project": project,
 	})
+}
+
+// ── File Read (direct, no agent) ──
+
+func (s *Server) handleReadFile(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	wd := s.workDir
+	s.mu.RUnlock()
+	if wd == "" { wd, _ = os.Getwd() }
+
+	relPath := r.URL.Query().Get("path")
+	if relPath == "" {
+		writeError(w, 400, "path required")
+		return
+	}
+
+	// Security: prevent path traversal outside workspace
+	fullPath := filepath.Join(wd, relPath)
+	absWd, _ := filepath.Abs(wd)
+	absFile, _ := filepath.Abs(fullPath)
+	if !strings.HasPrefix(absFile, absWd) {
+		writeError(w, 403, "Access denied: path outside workspace")
+		return
+	}
+
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		writeError(w, 404, "File not found")
+		return
+	}
+
+	ext := strings.ToLower(filepath.Ext(fullPath))
+
+	// Binary check
+	isBinary := false
+	if f, err := os.Open(fullPath); err == nil {
+		buf := make([]byte, 512)
+		n, _ := f.Read(buf)
+		f.Close()
+		for _, b := range buf[:n] {
+			if b == 0 { isBinary = true; break }
+		}
+	}
+
+	if isBinary {
+		writeJSON(w, map[string]any{
+			"path": relPath, "type": "binary", "size": info.Size(),
+			"ext": ext, "lines": 0, "content": "[Binary file]",
+		})
+		return
+	}
+
+	// Image
+	if ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif" || ext == ".svg" || ext == ".webp" || ext == ".ico" {
+		writeJSON(w, map[string]any{
+			"path": relPath, "type": "image", "size": info.Size(),
+			"ext": ext, "lines": 0, "content": "[Image file: " + ext + "]",
+		})
+		return
+	}
+
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		writeError(w, 500, "Read error: "+err.Error())
+		return
+	}
+
+	content := string(data)
+	lines := strings.Count(content, "\n") + 1
+
+	// Truncate large files
+	if len(content) > 100000 {
+		content = content[:100000] + "\n... (truncated)"
+	}
+
+	fileType := "text"
+	if ext == ".md" { fileType = "markdown" }
+	if ext == ".json" { fileType = "json" }
+	if ext == ".go" || ext == ".ts" || ext == ".tsx" || ext == ".js" || ext == ".py" || ext == ".rs" || ext == ".java" || ext == ".cs" {
+		fileType = "code"
+	}
+
+	writeJSON(w, map[string]any{
+		"path": relPath, "type": fileType, "size": info.Size(),
+		"ext": ext, "lines": lines, "content": content,
+	})
+}
+
+// ── Recursive File Tree (for accordion) ──
+
+type treeNode struct {
+	Name     string      `json:"name"`
+	Path     string      `json:"path"`
+	IsDir    bool        `json:"isDir"`
+	Size     int64       `json:"size,omitempty"`
+	Lines    int         `json:"lines,omitempty"`
+	Children []*treeNode `json:"children,omitempty"`
+}
+
+func (s *Server) handleFileTree(w http.ResponseWriter, _ *http.Request) {
+	s.mu.RLock()
+	wd := s.workDir
+	s.mu.RUnlock()
+	if wd == "" { wd, _ = os.Getwd() }
+
+	root := buildTree(wd, wd, 4, 0) // max depth 4
+	writeJSON(w, root)
+}
+
+func buildTree(basePath, currentPath string, maxDepth, depth int) []*treeNode {
+	if depth >= maxDepth { return nil }
+
+	entries, err := os.ReadDir(currentPath)
+	if err != nil { return nil }
+
+	skipDirs := map[string]bool{
+		"node_modules": true, ".git": true, "__pycache__": true,
+		"dist": true, ".next": true, "vendor": true, ".venv": true,
+		"target": true, ".idea": true, "build": true,
+	}
+
+	var nodes []*treeNode
+
+	// Directories first
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".") && e.Name() != ".github" { continue }
+		if !e.IsDir() { continue }
+		if skipDirs[e.Name()] { continue }
+
+		fullPath := filepath.Join(currentPath, e.Name())
+		rel, _ := filepath.Rel(basePath, fullPath)
+
+		node := &treeNode{
+			Name:  e.Name(),
+			Path:  strings.ReplaceAll(rel, "\\", "/"),
+			IsDir: true,
+		}
+		node.Children = buildTree(basePath, fullPath, maxDepth, depth+1)
+		nodes = append(nodes, node)
+	}
+
+	// Then files
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".") { continue }
+		if e.IsDir() { continue }
+
+		fullPath := filepath.Join(currentPath, e.Name())
+		rel, _ := filepath.Rel(basePath, fullPath)
+		info, _ := e.Info()
+
+		size := int64(0)
+		if info != nil { size = info.Size() }
+
+		nodes = append(nodes, &treeNode{
+			Name: e.Name(),
+			Path: strings.ReplaceAll(rel, "\\", "/"),
+			Size: size,
+		})
+	}
+
+	return nodes
 }
 
 func (s *Server) handleRegisterProvider(w http.ResponseWriter, r *http.Request) {
