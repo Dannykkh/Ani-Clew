@@ -3,6 +3,7 @@ package providers
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/aniclew/aniclew/internal/types"
 )
@@ -11,10 +12,54 @@ var ProviderOrder = []string{
 	"anthropic", "openai", "gemini", "groq", "ollama", "github-copilot", "zai",
 }
 
+// customProviders stores dynamically registered providers (e.g., remote Ollama instances)
+var customProviders = map[string]*types.ProviderConfig{}
+
+// RegisterCustomProvider adds a custom provider (e.g., ollama-home, ollama-office)
+func RegisterCustomProvider(name string, cfg *types.ProviderConfig) {
+	customProviders[name] = cfg
+	// Add to provider order if not already there
+	for _, p := range ProviderOrder {
+		if p == name { return }
+	}
+	ProviderOrder = append(ProviderOrder, name)
+}
+
+// ListCustomProviders returns all registered custom providers
+func ListCustomProviders() map[string]*types.ProviderConfig {
+	return customProviders
+}
+
 func Create(name string, cfg *types.ProviderConfig) (types.Provider, error) {
 	if cfg == nil {
 		cfg = &types.ProviderConfig{}
 	}
+
+	// Check custom providers first (remote Ollama instances, etc.)
+	if custom, ok := customProviders[name]; ok {
+		merged := &types.ProviderConfig{
+			APIKey:  coalesce(cfg.APIKey, custom.APIKey),
+			BaseURL: coalesce(cfg.BaseURL, custom.BaseURL),
+		}
+		// Determine base type from name prefix
+		if strings.HasPrefix(name, "ollama") {
+			return NewOllama(merged), nil
+		}
+		if strings.HasPrefix(name, "openai") {
+			return NewOpenAI(merged), nil
+		}
+		// Default to OpenAI-compatible
+		return &OpenAICompat{
+			ProviderName: name,
+			ProviderDisp: name + " (custom)",
+			BaseURL:      merged.BaseURL,
+			AuthHeader:   func() (string, string) { return "Authorization", "Bearer " + merged.APIKey },
+			ModelList: []types.ModelInfo{
+				{ID: "default", DisplayName: "Default Model"},
+			},
+		}, nil
+	}
+
 	switch name {
 	case "anthropic":
 		return NewAnthropic(cfg), nil
@@ -31,7 +76,7 @@ func Create(name string, cfg *types.ProviderConfig) (types.Provider, error) {
 	case "zai":
 		return NewZai(cfg), nil
 	default:
-		return nil, fmt.Errorf("unknown provider: %s", name)
+		return nil, fmt.Errorf("unknown provider: %s. Register custom providers via /api/providers/register", name)
 	}
 }
 

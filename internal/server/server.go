@@ -124,6 +124,7 @@ func (s *Server) Start() error {
 	mux.Handle("GET /favicon.svg", webHandler)
 	mux.Handle("GET /icons.svg", webHandler)
 	mux.HandleFunc("GET /api/providers", s.handleListProviders)
+	mux.HandleFunc("POST /api/providers/register", s.handleRegisterProvider)
 	mux.HandleFunc("GET /api/config", s.handleGetConfig)
 	mux.HandleFunc("PUT /api/config", s.handleSetConfig)
 	mux.HandleFunc("GET /api/routes", s.handleGetRoutes)
@@ -366,6 +367,45 @@ func (s *Server) handleListProviders(w http.ResponseWriter, _ *http.Request) {
 		result = append(result, info{Name: p.Name(), DisplayName: p.DisplayName(), Models: p.Models()})
 	}
 	writeJSON(w, result)
+}
+
+func (s *Server) handleRegisterProvider(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name    string `json:"name"`    // e.g., "ollama-home", "ollama-office"
+		BaseURL string `json:"baseUrl"` // e.g., "http://192.168.1.100:11434"
+		APIKey  string `json:"apiKey"`  // optional
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, 400, "Invalid JSON")
+		return
+	}
+	if body.Name == "" || body.BaseURL == "" {
+		writeError(w, 400, "name and baseUrl required")
+		return
+	}
+
+	providers.RegisterCustomProvider(body.Name, &types.ProviderConfig{
+		APIKey:  body.APIKey,
+		BaseURL: body.BaseURL,
+	})
+
+	// Save to config
+	cfg := config.Load()
+	if cfg.Providers == nil {
+		cfg.Providers = map[string]config.ProviderSettings{}
+	}
+	cfg.Providers[body.Name] = config.ProviderSettings{
+		APIKey:  body.APIKey,
+		BaseURL: body.BaseURL,
+	}
+	config.Save(cfg)
+
+	log.Printf("Custom provider registered: %s → %s", body.Name, body.BaseURL)
+	writeJSON(w, map[string]any{
+		"ok":   true,
+		"name": body.Name,
+		"url":  body.BaseURL,
+	})
 }
 
 // ── Config API ──
