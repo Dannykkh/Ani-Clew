@@ -65,16 +65,25 @@ func LoadProjectContext(workDir string) string {
 	return "\n\n--- PROJECT CONTEXT ---\n" + strings.Join(parts, "\n\n")
 }
 
-// LoadSkills reads skills from multiple directories.
-// Priority: project → user ~/.claude → user ~/.codex → custom dirs from config
+// LoadSkills reads skills using default "all" source.
 func LoadSkills(workDir string) []SkillInfo {
-	return LoadSkillsWithConfig(workDir, nil)
+	return LoadSkillsWithSource(workDir, "all", nil)
 }
 
-// LoadSkillsWithConfig reads skills with additional custom directories.
+// LoadSkillsWithConfig for backward compatibility.
 func LoadSkillsWithConfig(workDir string, extraDirs []string) []SkillInfo {
+	return LoadSkillsWithSource(workDir, "all", extraDirs)
+}
+
+// LoadSkillsWithSource reads skills filtered by source.
+// source: "claude", "codex", "gemini", "all", "none"
+func LoadSkillsWithSource(workDir, source string, extraDirs []string) []SkillInfo {
+	if source == "none" {
+		return nil
+	}
+
 	var skills []SkillInfo
-	seen := make(map[string]bool) // dedup by name
+	seen := make(map[string]bool)
 
 	addSkills := func(dir string) {
 		for _, s := range loadSkillsFromDir(dir) {
@@ -85,26 +94,32 @@ func LoadSkillsWithConfig(workDir string, extraDirs []string) []SkillInfo {
 		}
 	}
 
-	// 1. Project-level skills
+	home, _ := os.UserHomeDir()
+
+	// Project-level always loaded (regardless of source)
 	addSkills(filepath.Join(workDir, ".claude", "skills"))
 
-	// 2. User-level: Claude Code
-	home, _ := os.UserHomeDir()
-	if home != "" {
-		addSkills(filepath.Join(home, ".claude", "skills"))
+	switch source {
+	case "claude":
+		if home != "" {
+			addSkills(filepath.Join(home, ".claude", "skills"))
+		}
+	case "codex":
+		if home != "" {
+			addSkills(filepath.Join(home, ".codex", "skills"))
+		}
+	case "gemini":
+		if home != "" {
+			addSkills(filepath.Join(home, ".gemini", "skills"))
+		}
+	case "all":
+		if home != "" {
+			addSkills(filepath.Join(home, ".claude", "skills"))
+			addSkills(filepath.Join(home, ".codex", "skills"))
+			addSkills(filepath.Join(home, ".gemini", "skills"))
+		}
 	}
 
-	// 3. User-level: Codex CLI
-	if home != "" {
-		addSkills(filepath.Join(home, ".codex", "skills"))
-	}
-
-	// 4. User-level: Gemini CLI
-	if home != "" {
-		addSkills(filepath.Join(home, ".gemini", "skills"))
-	}
-
-	// 5. Custom directories from config
 	for _, dir := range extraDirs {
 		addSkills(dir)
 	}
