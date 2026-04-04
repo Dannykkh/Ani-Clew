@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { ChatPage } from './pages/Chat';
+import { WorkspacePage } from './pages/Workspace';
+import { ExplorerPage } from './pages/Explorer';
 import { SettingsPage } from './pages/Settings';
 import { RoutesPage } from './pages/Routes';
 import { CostsPage } from './pages/Costs';
 import { KairosPage } from './pages/Kairos';
 import { MemoryPage } from './pages/Memory';
 import { TeamPage } from './pages/Team';
-import { ExplorerPage } from './pages/Explorer';
 import { fetchJSON } from './lib/api';
 
 function App() {
@@ -49,6 +50,7 @@ function App() {
       />
       <main className="flex-1 overflow-hidden">
         {page === 'chat' && <ChatPage />}
+        {page === 'workspace' && <WorkspacePage />}
         {page === 'explorer' && <ExplorerPage />}
         {page === 'settings' && <SettingsPage />}
         {page === 'routes' && <RoutesPage />}

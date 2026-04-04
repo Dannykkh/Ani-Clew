@@ -7,6 +7,7 @@ const translations = {
   'nav.routes': { ko: '라우팅 규칙', en: 'Routes' },
   'nav.costs': { ko: '비용', en: 'Costs' },
   'nav.kairos': { ko: 'KAIROS', en: 'KAIROS' },
+  'nav.workspace': { ko: '워크스페이스', en: 'Workspace' },
   'nav.explorer': { ko: '파일 탐색기', en: 'Explorer' },
   'nav.memory': { ko: '메모리', en: 'Memory' },
   'nav.team': { ko: '팀', en: 'Team' },

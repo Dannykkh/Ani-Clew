@@ -8,6 +8,7 @@ interface NavItem {
 
 const items: NavItem[] = [
   { id: 'chat', labelKey: 'nav.chat', icon: '💬' },
+  { id: 'workspace', labelKey: 'nav.workspace', icon: '📂' },
   { id: 'explorer', labelKey: 'nav.explorer', icon: '📁' },
   { id: 'settings', labelKey: 'nav.settings', icon: '⚙️' },
   { id: 'routes', labelKey: 'nav.routes', icon: '🔀' },
