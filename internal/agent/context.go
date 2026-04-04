@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -125,15 +126,59 @@ func loadSkillsFromDir(dir string) []SkillInfo {
 	return skills
 }
 
-// LoadMCPConfig reads .mcp.json from the workspace.
+// LoadMCPConfig reads MCP configuration from multiple sources.
+// Priority: .mcp.json > .claude/settings.json > ~/.claude/settings.json
 func LoadMCPConfig(workDir string) string {
+	// 1. Project .mcp.json
 	for _, name := range []string{".mcp.json", "mcp.json"} {
 		content := readFileIfExists(filepath.Join(workDir, name))
 		if content != "" {
 			return content
 		}
 	}
+
+	// 2. Project .claude/settings.json → extract mcpServers
+	mcpFromSettings := extractMCPFromSettings(filepath.Join(workDir, ".claude", "settings.json"))
+	if mcpFromSettings != "" {
+		return mcpFromSettings
+	}
+
+	// 3. Global ~/.claude/settings.json
+	home, _ := os.UserHomeDir()
+	if home != "" {
+		mcpFromSettings = extractMCPFromSettings(filepath.Join(home, ".claude", "settings.json"))
+		if mcpFromSettings != "" {
+			return mcpFromSettings
+		}
+	}
+
 	return ""
+}
+
+// extractMCPFromSettings extracts mcpServers from a Claude settings.json file.
+func extractMCPFromSettings(path string) string {
+	content := readFileIfExists(path)
+	if content == "" {
+		return ""
+	}
+
+	var settings map[string]interface{}
+	if json.Unmarshal([]byte(content), &settings) != nil {
+		return ""
+	}
+
+	// Look for mcpServers key
+	mcpServers, ok := settings["mcpServers"]
+	if !ok {
+		return ""
+	}
+
+	// Wrap in expected format
+	wrapped := map[string]interface{}{
+		"mcpServers": mcpServers,
+	}
+	data, _ := json.Marshal(wrapped)
+	return string(data)
 }
 
 func readFileIfExists(path string) string {

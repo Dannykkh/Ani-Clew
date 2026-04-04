@@ -92,9 +92,21 @@ func ToolDefs(workDir string) []types.ToolDef {
 	}
 }
 
-// AllToolDefs returns base + extended tool definitions.
+// AllToolDefs returns base + extended + computer use tool definitions.
 func AllToolDefs(workDir string) []types.ToolDef {
-	return append(ToolDefs(workDir), ExtendedToolDefs()...)
+	all := append(ToolDefs(workDir), ExtendedToolDefs()...)
+	all = append(all, ComputerUseToolDefs()...)
+
+	// Add MCP tools dynamically
+	for _, t := range GetMCPTools() {
+		all = append(all, types.ToolDef{
+			Name:        t.Name,
+			Description: t.Description,
+			InputSchema: t.InputSchema,
+		})
+	}
+
+	return all
 }
 
 // ExecuteTool runs a tool and returns the result text.
@@ -102,6 +114,11 @@ func ExecuteTool(name string, input json.RawMessage, workDir string) (string, bo
 	// Try extended tools first
 	if result, isErr, handled := ExecuteExtendedTool(name, input, workDir); handled {
 		return result, isErr
+	}
+
+	// Try Computer Use tools
+	if cuResult, cuErr, cuHandled := ExecuteComputerUseTool(name, input, workDir); cuHandled {
+		return cuResult, cuErr
 	}
 
 	// Try MCP tools
