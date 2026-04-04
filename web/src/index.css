@@ -15,11 +15,28 @@
   --color-orange: #fb923c;
 }
 
+/* Light theme */
+[data-theme="light"] {
+  --color-bg: #f8f9fb;
+  --color-surface: #ffffff;
+  --color-surface2: #f0f1f4;
+  --color-border: #e2e4e9;
+  --color-text: #1a1d27;
+  --color-text2: #6b7080;
+  --color-accent: #4a6adf;
+  --color-accent2: #3454c5;
+  --color-green: #059669;
+  --color-yellow: #d97706;
+  --color-red: #dc2626;
+  --color-orange: #ea580c;
+}
+
 body {
   margin: 0;
   background: var(--color-bg);
   color: var(--color-text);
   font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+  transition: background 0.3s, color 0.3s;
 }
 
 #root {

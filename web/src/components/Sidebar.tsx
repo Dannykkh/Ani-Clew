@@ -8,6 +8,7 @@ interface NavItem {
 
 const items: NavItem[] = [
   { id: 'chat', labelKey: 'nav.chat', icon: '💬' },
+  { id: 'explorer', labelKey: 'nav.explorer', icon: '📁' },
   { id: 'settings', labelKey: 'nav.settings', icon: '⚙️' },
   { id: 'routes', labelKey: 'nav.routes', icon: '🔀' },
   { id: 'costs', labelKey: 'nav.costs', icon: '💰' },
@@ -20,10 +21,12 @@ interface Props {
   active: string;
   onNavigate: (id: string) => void;
   onLangChange: () => void;
+  onThemeToggle: () => void;
+  theme: 'dark' | 'light';
   status: { provider: string; model: string; router: boolean } | null;
 }
 
-export function Sidebar({ active, onNavigate, onLangChange, status }: Props) {
+export function Sidebar({ active, onNavigate, onLangChange, onThemeToggle, theme, status }: Props) {
   const lang = getLang();
 
   function toggleLang() {
@@ -65,14 +68,21 @@ export function Sidebar({ active, onNavigate, onLangChange, status }: Props) {
         ))}
       </nav>
 
-      {/* Language Toggle */}
-      <div className="px-3 py-2 border-t border-[var(--color-border)]">
+      {/* Language + Theme Toggle */}
+      <div className="px-3 py-2 border-t border-[var(--color-border)] space-y-1">
         <button
           onClick={toggleLang}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs text-[var(--color-text2)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors"
+          className="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg text-xs text-[var(--color-text2)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors"
         >
-          <span className="text-base">🌐</span>
+          <span>🌐</span>
           {lang === 'ko' ? '한국어 → English' : 'English → 한국어'}
+        </button>
+        <button
+          onClick={onThemeToggle}
+          className="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg text-xs text-[var(--color-text2)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors"
+        >
+          <span>{theme === 'dark' ? '☀️' : '🌙'}</span>
+          {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
         </button>
       </div>
 
