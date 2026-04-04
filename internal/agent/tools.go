@@ -101,6 +101,7 @@ func ToolDefs(workDir string) []types.ToolDef {
 func AllToolDefs(workDir string) []types.ToolDef {
 	all := append(ToolDefs(workDir), ExtendedToolDefs()...)
 	all = append(all, ComputerUseToolDefs()...)
+	all = append(all, AdvancedToolDefs()...)
 
 	// Add MCP tools dynamically
 	for _, t := range GetMCPTools() {
@@ -119,6 +120,11 @@ func ExecuteTool(name string, input json.RawMessage, workDir string) (string, bo
 	// Try extended tools first
 	if result, isErr, handled := ExecuteExtendedTool(name, input, workDir); handled {
 		return result, isErr
+	}
+
+	// Try Advanced tools
+	if advResult, advErr, advHandled := ExecuteAdvancedTool(name, input, workDir); advHandled {
+		return advResult, advErr
 	}
 
 	// Try Computer Use tools

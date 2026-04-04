@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            suffix: linux-amd64
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            suffix: linux-arm64
+          - os: ubuntu-latest
+            goos: darwin
+            goarch: amd64
+            suffix: mac-intel
+          - os: ubuntu-latest
+            goos: darwin
+            goarch: arm64
+            suffix: mac-arm64
+          - os: ubuntu-latest
+            goos: windows
+            goarch: amd64
+            suffix: windows-amd64.exe
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Build Web UI
+        run: |
+          cd web && bun install && bun run build
+          rm -rf ../internal/server/webdist
+          cp -r dist ../internal/server/webdist
+
+      - name: Build Binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          go build -ldflags="-s -w" -o aniclew-${{ matrix.suffix }} ./cmd/proxy/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aniclew-${{ matrix.suffix }}
+          path: aniclew-${{ matrix.suffix }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: aniclew-*
+          generate_release_notes: true
