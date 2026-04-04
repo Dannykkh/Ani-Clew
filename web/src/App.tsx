@@ -65,7 +65,7 @@ function App() {
       )}
 
       {/* Main Content */}
-      <main className="flex-1 min-w-0 overflow-hidden">
+      <main className="flex-1 min-w-0 h-screen overflow-hidden">
         {page === 'chat' && <ChatPage />}
         {page === 'files' && <ChatPage />} {/* Files mode = chat with file panel */}
         {page === 'routes' && <RoutesPage />}

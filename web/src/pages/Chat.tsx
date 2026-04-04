@@ -208,7 +208,7 @@ export function ChatPage() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full w-full">
       {/* Header — minimal */}
       <div className="px-4 py-1.5 border-b border-[var(--color-border)] bg-[var(--color-surface)] flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -225,10 +225,8 @@ export function ChatPage() {
         </div>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Messages Area — full width */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex-1 overflow-y-auto p-6 space-y-3">
+      {/* Messages Area — full width */}
+      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
             {messages.length === 0 && (
               <div className="flex flex-col items-center justify-center h-full text-[var(--color-text2)]">
                 <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[var(--color-accent)] to-purple-400 flex items-center justify-center text-white text-lg font-bold mb-4">A</div>
@@ -433,8 +431,6 @@ export function ChatPage() {
               </button>
             </div>
           </div>
-        </div>
-      </div>
     </div>
   );
 }
