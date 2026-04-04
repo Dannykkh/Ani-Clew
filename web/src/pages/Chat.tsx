@@ -22,7 +22,6 @@ export function ChatPage() {
   const [isListening, setIsListening] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [showHistory, setShowHistory] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -54,6 +53,7 @@ export function ChatPage() {
     listSessions().then(setSessions).catch(() => {});
   }, []);
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async function loadSession(id: string) {
     const sess = await getSession(id);
     const msgs: ChatMessage[] = (sess.messages || []).map((m) => ({
@@ -62,15 +62,14 @@ export function ChatPage() {
     }));
     setMessages(msgs);
     setSessionId(sess.id);
-    setShowHistory(false);
   }
 
   function newChat() {
     setMessages([]);
     setSessionId(null);
-    setShowHistory(false);
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async function handleDelete(id: string) {
     await deleteSession(id);
     setSessions((prev) => prev.filter((s) => s.id !== id));
@@ -209,23 +208,11 @@ export function ChatPage() {
   }
 
   return (
-    <div className="flex flex-col h-screen">
-      {/* Header */}
-      <div className="px-4 py-2.5 border-b border-[var(--color-border)] bg-[var(--color-surface)] flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setShowHistory(!showHistory)}
-            className="px-2.5 py-1.5 rounded-lg text-xs text-[var(--color-text2)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors"
-          >
-            {showHistory ? '✕' : '📋'} {t('session.history')}
-          </button>
-          <button
-            onClick={newChat}
-            className="px-2.5 py-1.5 rounded-lg text-xs bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent2)] transition-colors"
-          >
-            + {t('session.new')}
-          </button>
-          <h1 className="text-sm font-semibold">{t('chat.title')}</h1>
+    <div className="flex flex-col h-screen pb-6">
+      {/* Header — minimal */}
+      <div className="px-4 py-1.5 border-b border-[var(--color-border)] bg-[var(--color-surface)] flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <h1 className="text-xs font-semibold text-[var(--color-text2)]">{t('chat.title')}</h1>
         </div>
         <div className="flex items-center gap-2 text-xs text-[var(--color-text2)]">
           {status && (
@@ -239,42 +226,7 @@ export function ChatPage() {
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Session History Panel */}
-        {showHistory && (
-          <div className="w-64 border-r border-[var(--color-border)] bg-[var(--color-surface)] overflow-y-auto shrink-0">
-            <div className="p-2 space-y-1">
-              {sessions.length === 0 ? (
-                <div className="text-xs text-[var(--color-text2)] text-center py-8">{t('session.noHistory')}</div>
-              ) : (
-                sessions.map((s) => (
-                  <div
-                    key={s.id}
-                    className={`group px-3 py-2.5 rounded-lg cursor-pointer transition-colors ${
-                      sessionId === s.id ? 'bg-[var(--color-surface2)]' : 'hover:bg-[var(--color-surface2)]'
-                    }`}
-                    onClick={() => loadSession(s.id)}
-                  >
-                    <div className="text-xs font-medium text-[var(--color-text)] truncate">{s.title}</div>
-                    <div className="text-[10px] text-[var(--color-text2)] truncate mt-0.5">{s.preview}</div>
-                    <div className="flex items-center justify-between mt-1">
-                      <span className="text-[10px] text-[var(--color-text2)]">
-                        {s.turns} {t('session.turns')} · {s.model}
-                      </span>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleDelete(s.id); }}
-                        className="opacity-0 group-hover:opacity-100 text-[10px] text-[var(--color-red)] hover:underline"
-                      >
-                        {t('session.delete')}
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Messages Area */}
+        {/* Messages Area — full width */}
         <div className="flex-1 flex flex-col overflow-hidden">
           <div className="flex-1 overflow-y-auto p-6 space-y-3">
             {messages.length === 0 && (
@@ -290,7 +242,7 @@ export function ChatPage() {
               if (msg.role === 'user') {
                 return (
                   <div key={i} className="flex justify-end">
-                    <div className="max-w-[70%] bg-[var(--color-accent)] text-white rounded-xl rounded-br-sm px-4 py-3 text-sm">
+                    <div className="max-w-[85%] bg-[var(--color-accent)] text-white rounded-xl rounded-br-sm px-4 py-3 text-sm">
                       <div className="whitespace-pre-wrap">{msg.content}</div>
                       <div className="text-[10px] text-white/50 mt-1">{msg.timestamp.toLocaleTimeString()}</div>
                     </div>
@@ -346,7 +298,7 @@ export function ChatPage() {
               if (msg.content === '') return null;
               return (
                 <div key={i} className="flex justify-start">
-                  <div className="max-w-[80%] bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl rounded-bl-sm px-4 py-3 text-sm">
+                  <div className="max-w-[95%] bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl rounded-bl-sm px-4 py-3 text-sm">
                     <div className="chat-md"><Markdown content={msg.content} /></div>
                   </div>
                 </div>
@@ -359,7 +311,7 @@ export function ChatPage() {
           <div className="p-4 border-t border-[var(--color-border)] bg-[var(--color-surface)]">
             {/* Image preview */}
             {attachedImage && (
-              <div className="max-w-4xl mx-auto mb-2 flex items-center gap-2">
+              <div className="w-full mb-2 flex items-center gap-2">
                 <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg p-1 flex items-center gap-2">
                   <img src={`data:image/png;base64,${attachedImage}`} className="h-12 rounded" alt="attached" />
                   <button onClick={() => setAttachedImage(null)} className="text-xs text-[var(--color-red)] px-1">✕</button>
@@ -367,7 +319,7 @@ export function ChatPage() {
                 <span className="text-xs text-[var(--color-text2)]">Image attached</span>
               </div>
             )}
-            <div className="flex gap-2 items-end max-w-4xl mx-auto">
+            <div className="flex gap-2 items-end w-full">
               {/* Image upload */}
               <label className="px-3 py-3 rounded-xl cursor-pointer text-[var(--color-text2)] hover:bg-[var(--color-surface2)] transition-colors" title="Attach image">
                 <span>📎</span>
