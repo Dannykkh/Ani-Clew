@@ -15,6 +15,12 @@ web/dist/
 # Config (user-specific)
 config.json
 
+# Private data (conversations, memory, sessions)
+MEMORY.md
+memory/
+conversations/
+sessions/
+
 # IDE
 .idea/
 .vscode/
