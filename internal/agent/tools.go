@@ -53,24 +53,26 @@ func ToolDefs(workDir string) []types.ToolDef {
 		},
 		{
 			Name:        "Edit",
-			Description: "Replace a specific string in a file. The old_string must match exactly.",
+			Description: "Replace a string in a file. Supports exact match, replace_all, and regex mode.",
 			InputSchema: json.RawMessage(`{
 				"type": "object",
 				"properties": {
 					"file_path": {"type": "string", "description": "Path to the file to edit"},
-					"old_string": {"type": "string", "description": "The exact string to find and replace"},
-					"new_string": {"type": "string", "description": "The replacement string"}
+					"old_string": {"type": "string", "description": "The string to find and replace"},
+					"new_string": {"type": "string", "description": "The replacement string"},
+					"replace_all": {"type": "boolean", "description": "Replace all occurrences (default: false, first only)"},
+					"regex": {"type": "boolean", "description": "Treat old_string as regex pattern"}
 				},
 				"required": ["file_path", "old_string", "new_string"]
 			}`),
 		},
 		{
 			Name:        "Glob",
-			Description: "Find files matching a glob pattern (e.g., '**/*.go', 'src/**/*.ts').",
+			Description: "Find files matching a glob pattern. Supports recursive '**' patterns (e.g., '**/*.go', 'src/**/*.ts').",
 			InputSchema: json.RawMessage(`{
 				"type": "object",
 				"properties": {
-					"pattern": {"type": "string", "description": "Glob pattern to match"},
+					"pattern": {"type": "string", "description": "Glob pattern to match (supports **)"},
 					"path": {"type": "string", "description": "Directory to search in (default: working directory)"}
 				},
 				"required": ["pattern"]
@@ -78,13 +80,16 @@ func ToolDefs(workDir string) []types.ToolDef {
 		},
 		{
 			Name:        "Grep",
-			Description: "Search file contents using a regex pattern. Returns matching lines.",
+			Description: "Search file contents using regex. Supports ripgrep features: context lines, case-insensitive, file type filter.",
 			InputSchema: json.RawMessage(`{
 				"type": "object",
 				"properties": {
 					"pattern": {"type": "string", "description": "Regex pattern to search for"},
 					"path": {"type": "string", "description": "File or directory to search in"},
-					"glob": {"type": "string", "description": "Only search files matching this glob"}
+					"glob": {"type": "string", "description": "Only search files matching this glob (e.g., '*.go')"},
+					"context": {"type": "integer", "description": "Lines of context around each match"},
+					"ignore_case": {"type": "boolean", "description": "Case-insensitive search"},
+					"files_only": {"type": "boolean", "description": "Only show matching file names"}
 				},
 				"required": ["pattern"]
 			}`),
@@ -127,20 +132,20 @@ func ExecuteTool(name string, input json.RawMessage, workDir string) (string, bo
 		return mcpResult, mcpErr
 	}
 
-	// Base tools
+	// Base tools (V2 improved)
 	switch name {
 	case "Bash":
-		return executeBash(input, workDir)
+		return executeBashV2(input, workDir)
 	case "Read":
-		return executeRead(input, workDir)
+		return executeReadV2(input, workDir)
 	case "Write":
-		return executeWrite(input, workDir)
+		return executeWriteV2(input, workDir)
 	case "Edit":
-		return executeEdit(input, workDir)
+		return executeEditV2(input, workDir)
 	case "Glob":
-		return executeGlob(input, workDir)
+		return executeGlobV2(input, workDir)
 	case "Grep":
-		return executeGrep(input, workDir)
+		return executeGrepV2(input, workDir)
 	default:
 		return fmt.Sprintf("Unknown tool: %s", name), true
 	}
