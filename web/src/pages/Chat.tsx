@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { t } from '../lib/i18n';
+import { Markdown } from '../components/Markdown';
 import { listSessions, getSession, saveSession, deleteSession, type SessionSummary, type SessionMessage } from '../lib/sessions';
 
 interface ChatMessage {
@@ -346,7 +347,7 @@ export function ChatPage() {
               return (
                 <div key={i} className="flex justify-start">
                   <div className="max-w-[80%] bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl rounded-bl-sm px-4 py-3 text-sm">
-                    <div className="chat-md whitespace-pre-wrap">{msg.content}</div>
+                    <div className="chat-md"><Markdown content={msg.content} /></div>
                   </div>
                 </div>
               );
