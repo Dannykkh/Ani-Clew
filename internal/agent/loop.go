@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/aniclew/aniclew/internal/types"
 )
@@ -165,12 +166,27 @@ func RunLoop(
 			MaxTokens: 8192,
 		}
 
-		// Call LLM
-		eventCh <- Event{Type: "status", Data: "Thinking..."}
+		// Call LLM (with retry)
+		eventCh <- Event{Type: "status", Data: fmt.Sprintf("Thinking... (iteration %d/%d, ~%dk tokens)", i+1, maxIterations, estimatedTokens/1000)}
 
-		ch, err := provider.StreamMessage(ctx, req, nil)
+		var ch <-chan types.SSEEvent
+		var err error
+		for retry := 0; retry < 3; retry++ {
+			ch, err = provider.StreamMessage(ctx, req, nil)
+			if err == nil {
+				break
+			}
+			if retry < 2 {
+				eventCh <- Event{Type: "status", Data: fmt.Sprintf("Retrying... (%d/3): %s", retry+1, err.Error())}
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(2 * time.Second):
+				}
+			}
+		}
 		if err != nil {
-			eventCh <- Event{Type: "error", Data: err.Error()}
+			eventCh <- Event{Type: "error", Data: fmt.Sprintf("Failed after 3 retries: %s", err.Error())}
 			return
 		}
 
@@ -230,7 +246,11 @@ func RunLoop(
 
 		// ── No tool calls → done ──
 		if len(toolUses) == 0 {
-			eventCh <- Event{Type: "done", Data: nil}
+			eventCh <- Event{Type: "done", Data: map[string]interface{}{
+				"iterations":     i + 1,
+				"estimatedTokens": estimatedTokens,
+				"project":        project.Type,
+			}}
 			return
 		}
 

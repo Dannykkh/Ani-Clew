@@ -8,6 +8,7 @@ export function SettingsPage() {
   const [selProvider, setSelProvider] = useState('');
   const [selModel, setSelModel] = useState('');
   const [responseLang, setResponseLang] = useState('auto');
+  const [skillSource, setSkillSource] = useState('all');
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
@@ -143,6 +144,36 @@ export function SettingsPage() {
                 }`}
               >
                 {lang.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Skill Source */}
+        <div className="py-3 border-t border-[var(--color-border)]">
+          <div className="text-sm font-medium mb-2">Skill Source</div>
+          <div className="text-xs text-[var(--color-text2)] mb-3">스킬을 어디서 가져올지 / Where to load skills from</div>
+          <div className="flex gap-2 flex-wrap">
+            {[
+              { id: 'all', label: 'All (전체)' },
+              { id: 'claude', label: 'Claude Code' },
+              { id: 'codex', label: 'Codex CLI' },
+              { id: 'gemini', label: 'Gemini CLI' },
+              { id: 'none', label: 'None (없음)' },
+            ].map((src) => (
+              <button
+                key={src.id}
+                onClick={async () => {
+                  setSkillSource(src.id);
+                  await putJSON('/api/skill-source', { source: src.id });
+                }}
+                className={`px-4 py-2 rounded-lg text-sm transition-colors ${
+                  skillSource === src.id
+                    ? 'bg-[var(--color-accent)] text-white'
+                    : 'bg-[var(--color-surface2)] text-[var(--color-text2)] hover:text-[var(--color-text)]'
+                }`}
+              >
+                {src.label}
               </button>
             ))}
           </div>

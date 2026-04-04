@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/aniclew/aniclew/internal/agent"
+	"github.com/aniclew/aniclew/internal/config"
 	"github.com/aniclew/aniclew/internal/gateway"
 	"github.com/aniclew/aniclew/internal/kairos"
 	"github.com/aniclew/aniclew/internal/providers"
@@ -161,6 +162,8 @@ func (s *Server) Start() error {
 	// Project context
 	mux.HandleFunc("GET /api/context", s.handleProjectContext)
 	mux.HandleFunc("GET /api/skills", s.handleSkillsList)
+	mux.HandleFunc("GET /api/project", s.handleProjectDetect)
+	mux.HandleFunc("PUT /api/skill-source", s.handleSetSkillSource)
 
 	// Slash commands
 	mux.HandleFunc("GET /api/commands", s.handleCommandsList)
@@ -755,6 +758,23 @@ func (s *Server) handleSkillsList(w http.ResponseWriter, r *http.Request) {
 		result = append(result, skillInfo{Name: sk.Name, Path: sk.Path, Source: source})
 	}
 	writeJSON(w, result)
+}
+
+func (s *Server) handleProjectDetect(w http.ResponseWriter, r *http.Request) {
+	workDir := r.URL.Query().Get("workDir")
+	if workDir == "" { workDir, _ = os.Getwd() }
+	info := agent.DetectProject(workDir)
+	writeJSON(w, info)
+}
+
+func (s *Server) handleSetSkillSource(w http.ResponseWriter, r *http.Request) {
+	var body struct{ Source string `json:"source"` }
+	json.NewDecoder(r.Body).Decode(&body)
+	// Save to config
+	cfg := config.Load()
+	cfg.SkillSource = body.Source
+	config.Save(cfg)
+	writeJSON(w, map[string]any{"ok": true, "skillSource": body.Source})
 }
 
 // ── Session Management ──
