@@ -2,8 +2,9 @@ package server
 
 import (
 	"embed"
-	"io/fs"
+	"encoding/base64"
 	"encoding/json"
+	"io/fs"
 	"fmt"
 	"io"
 	"log"
@@ -158,6 +159,9 @@ func (s *Server) Start() error {
 
 	// Agent loop (Claude Code-style coding agent)
 	mux.HandleFunc("POST /api/agent", s.handleAgentLoop)
+
+	// Image upload
+	mux.HandleFunc("POST /api/upload", s.handleImageUpload)
 
 	// Project context
 	mux.HandleFunc("GET /api/context", s.handleProjectContext)
@@ -603,6 +607,38 @@ func (d *Server) handleKairosAutonomy(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(r.Body).Decode(&body)
 	daemon.SetAutonomy(body.Mode)
 	writeJSON(w, map[string]any{"ok": true, "autonomy": body.Mode})
+}
+
+// ── Image Upload ──
+
+func (s *Server) handleImageUpload(w http.ResponseWriter, r *http.Request) {
+	r.ParseMultipartForm(10 << 20) // 10MB max
+	file, header, err := r.FormFile("image")
+	if err != nil {
+		writeError(w, 400, "No image file: "+err.Error())
+		return
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		writeError(w, 500, "Read failed: "+err.Error())
+		return
+	}
+
+	b64 := base64.StdEncoding.EncodeToString(data)
+	mediaType := header.Header.Get("Content-Type")
+	if mediaType == "" {
+		mediaType = "image/png"
+	}
+
+	writeJSON(w, map[string]any{
+		"ok":        true,
+		"filename":  header.Filename,
+		"size":      len(data),
+		"mediaType": mediaType,
+		"base64":    b64,
+	})
 }
 
 // ── Sub-agents ──

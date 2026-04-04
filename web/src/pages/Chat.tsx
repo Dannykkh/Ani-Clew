@@ -17,6 +17,8 @@ export function ChatPage() {
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [status, setStatus] = useState('');
+  const [attachedImage, setAttachedImage] = useState<string | null>(null); // base64
+  const [isListening, setIsListening] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [showHistory, setShowHistory] = useState(false);
@@ -78,18 +80,32 @@ export function ChatPage() {
 
   async function send() {
     const text = input.trim();
-    if (!text || streaming) return;
+    if (!text && !attachedImage) return;
+    if (streaming) return;
 
     setInput('');
-    const userMsg: ChatMessage = { role: 'user', content: text, timestamp: new Date() };
+    const displayText = attachedImage ? `${text} [📎 image attached]` : text;
+    const userMsg: ChatMessage = { role: 'user', content: displayText || '[image]', timestamp: new Date() };
     const newMsgs = [...messages, userMsg];
     setMessages([...newMsgs, { role: 'assistant', content: '', timestamp: new Date() }]);
     setStreaming(true);
     setStatus(t('chat.thinking'));
 
+    // Build message content — include image if attached
+    let msgContent: string = text || 'Analyze this image.';
+    if (attachedImage) {
+      msgContent = `[Image attached (base64, ${Math.round(attachedImage.length / 1024)}KB)]\n\n${msgContent}`;
+    }
+
     const apiMessages = newMsgs
       .filter((m) => m.role === 'user' || m.role === 'assistant')
       .map((m) => ({ role: m.role, content: m.content }));
+    // Replace last with the actual content including image reference
+    if (apiMessages.length > 0) {
+      apiMessages[apiMessages.length - 1] = { role: 'user', content: msgContent };
+    }
+
+    setAttachedImage(null); // clear after sending
 
     try {
       const res = await fetch('/api/agent', {
@@ -340,12 +356,95 @@ export function ChatPage() {
 
           {/* Input */}
           <div className="p-4 border-t border-[var(--color-border)] bg-[var(--color-surface)]">
-            <div className="flex gap-3 items-end max-w-4xl mx-auto">
+            {/* Image preview */}
+            {attachedImage && (
+              <div className="max-w-4xl mx-auto mb-2 flex items-center gap-2">
+                <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg p-1 flex items-center gap-2">
+                  <img src={`data:image/png;base64,${attachedImage}`} className="h-12 rounded" alt="attached" />
+                  <button onClick={() => setAttachedImage(null)} className="text-xs text-[var(--color-red)] px-1">✕</button>
+                </div>
+                <span className="text-xs text-[var(--color-text2)]">Image attached</span>
+              </div>
+            )}
+            <div className="flex gap-2 items-end max-w-4xl mx-auto">
+              {/* Image upload */}
+              <label className="px-3 py-3 rounded-xl cursor-pointer text-[var(--color-text2)] hover:bg-[var(--color-surface2)] transition-colors" title="Attach image">
+                <span>📎</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                      const result = reader.result as string;
+                      const b64 = result.split(',')[1];
+                      setAttachedImage(b64);
+                    };
+                    reader.readAsDataURL(file);
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+
+              {/* Voice input */}
+              <button
+                onClick={() => {
+                  if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+                    alert('Speech recognition not supported in this browser');
+                    return;
+                  }
+                  const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+                  const recognition = new SpeechRecognition();
+                  recognition.continuous = false;
+                  recognition.interimResults = false;
+                  recognition.lang = 'ko-KR';
+                  recognition.onstart = () => setIsListening(true);
+                  recognition.onend = () => setIsListening(false);
+                  recognition.onresult = (event: any) => {
+                    const text = event.results[0][0].transcript;
+                    setInput((prev) => prev + text);
+                  };
+                  if (isListening) {
+                    recognition.stop();
+                  } else {
+                    recognition.start();
+                  }
+                }}
+                className={`px-3 py-3 rounded-xl transition-colors ${
+                  isListening
+                    ? 'bg-[var(--color-red)] text-white animate-pulse'
+                    : 'text-[var(--color-text2)] hover:bg-[var(--color-surface2)]'
+                }`}
+                title="Voice input"
+              >
+                🎤
+              </button>
+
               <textarea
                 ref={inputRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+                onPaste={(e) => {
+                  const items = e.clipboardData?.items;
+                  if (!items) return;
+                  for (const item of Array.from(items)) {
+                    if (item.type.startsWith('image/')) {
+                      e.preventDefault();
+                      const file = item.getAsFile();
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = () => {
+                        const result = reader.result as string;
+                        setAttachedImage(result.split(',')[1]);
+                      };
+                      reader.readAsDataURL(file);
+                    }
+                  }
+                }}
                 placeholder={t('chat.placeholder')}
                 rows={1}
                 className="flex-1 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl px-4 py-3 text-sm text-[var(--color-text)] resize-none focus:outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text2)]"
@@ -356,9 +455,25 @@ export function ChatPage() {
                   el.style.height = Math.min(el.scrollHeight, 200) + 'px';
                 }}
               />
+
+              {/* TTS for last response */}
+              <button
+                onClick={() => {
+                  const lastAssistant = messages.filter(m => m.role === 'assistant').pop();
+                  if (!lastAssistant?.content) return;
+                  const utterance = new SpeechSynthesisUtterance(lastAssistant.content.slice(0, 500));
+                  utterance.lang = 'ko-KR';
+                  speechSynthesis.speak(utterance);
+                }}
+                className="px-3 py-3 rounded-xl text-[var(--color-text2)] hover:bg-[var(--color-surface2)] transition-colors"
+                title="Read last response aloud"
+              >
+                🔊
+              </button>
+
               <button
                 onClick={send}
-                disabled={streaming || !input.trim()}
+                disabled={streaming || (!input.trim() && !attachedImage)}
                 className="px-5 py-3 bg-[var(--color-accent)] text-white rounded-xl text-sm font-medium disabled:opacity-40 hover:bg-[var(--color-accent2)] transition-colors"
               >
                 {streaming ? '...' : t('chat.send')}
