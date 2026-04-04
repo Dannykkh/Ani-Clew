@@ -10,6 +10,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -40,6 +42,7 @@ type Server struct {
 	abTester       *kairos.ABTester
 	gw             *gateway.Gateway
 	sessions       *agent.SessionStore
+	workDir        string // current workspace
 	port           int
 }
 
@@ -106,6 +109,12 @@ func (s *Server) SetSessionStore(ss *agent.SessionStore) {
 	s.sessions = ss
 }
 
+func (s *Server) SetWorkDir(dir string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.workDir = dir
+}
+
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
 
@@ -126,6 +135,11 @@ func (s *Server) Start() error {
 	mux.HandleFunc("GET /api/providers", s.handleListProviders)
 	mux.HandleFunc("POST /api/providers/register", s.handleRegisterProvider)
 	mux.HandleFunc("GET /api/config", s.handleGetConfig)
+
+	// Workspace / folder browsing
+	mux.HandleFunc("GET /api/browse", s.handleBrowseFolder)
+	mux.HandleFunc("PUT /api/workspace", s.handleSetWorkspace)
+	mux.HandleFunc("GET /api/workspace", s.handleGetWorkspace)
 	mux.HandleFunc("PUT /api/config", s.handleSetConfig)
 	mux.HandleFunc("GET /api/routes", s.handleGetRoutes)
 	mux.HandleFunc("PUT /api/routes", s.handleSetRoute)
@@ -367,6 +381,125 @@ func (s *Server) handleListProviders(w http.ResponseWriter, _ *http.Request) {
 		result = append(result, info{Name: p.Name(), DisplayName: p.DisplayName(), Models: p.Models()})
 	}
 	writeJSON(w, result)
+}
+
+// ── Workspace / Folder Browsing ──
+
+func (s *Server) handleBrowseFolder(w http.ResponseWriter, r *http.Request) {
+	dir := r.URL.Query().Get("path")
+	if dir == "" {
+		dir, _ = os.Getwd()
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		writeError(w, 400, "Cannot read directory: "+err.Error())
+		return
+	}
+
+	type entry struct {
+		Name  string `json:"name"`
+		IsDir bool   `json:"isDir"`
+		Size  int64  `json:"size"`
+		IsProject bool `json:"isProject"` // has go.mod, package.json, etc.
+	}
+
+	var result []entry
+	for _, e := range entries {
+		// Skip hidden files
+		if strings.HasPrefix(e.Name(), ".") && e.Name() != ".." {
+			continue
+		}
+		info, _ := e.Info()
+		size := int64(0)
+		if info != nil {
+			size = info.Size()
+		}
+
+		isProject := false
+		if e.IsDir() {
+			// Check if this directory is a project
+			for _, marker := range []string{"go.mod", "package.json", "Cargo.toml", "pyproject.toml", "pom.xml", "*.csproj", "*.sln"} {
+				if strings.Contains(marker, "*") {
+					matches, _ := filepath.Glob(filepath.Join(dir, e.Name(), marker))
+					if len(matches) > 0 { isProject = true; break }
+				} else if _, err := os.Stat(filepath.Join(dir, e.Name(), marker)); err == nil {
+					isProject = true
+					break
+				}
+			}
+		}
+
+		result = append(result, entry{
+			Name:  e.Name(),
+			IsDir: e.IsDir(),
+			Size:  size,
+			IsProject: isProject,
+		})
+	}
+
+	// Sort: directories first, then files
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].IsDir != result[j].IsDir {
+			return result[i].IsDir
+		}
+		return result[i].Name < result[j].Name
+	})
+
+	// Add parent directory
+	parent := filepath.Dir(dir)
+	writeJSON(w, map[string]any{
+		"current": dir,
+		"parent":  parent,
+		"entries": result,
+	})
+}
+
+func (s *Server) handleSetWorkspace(w http.ResponseWriter, r *http.Request) {
+	var body struct{ Path string `json:"path"` }
+	json.NewDecoder(r.Body).Decode(&body)
+
+	// Verify directory exists
+	info, err := os.Stat(body.Path)
+	if err != nil || !info.IsDir() {
+		writeError(w, 400, "Invalid directory: "+body.Path)
+		return
+	}
+
+	s.mu.Lock()
+	s.workDir = body.Path
+	s.mu.Unlock()
+
+	// Save to config
+	cfg := config.Load()
+	cfg.WorkDir = body.Path
+	config.Save(cfg)
+
+	// Detect project
+	project := agent.DetectProject(body.Path)
+
+	log.Printf("Workspace set: %s (%s)", body.Path, project.Type)
+	writeJSON(w, map[string]any{
+		"ok":      true,
+		"path":    body.Path,
+		"project": project,
+	})
+}
+
+func (s *Server) handleGetWorkspace(w http.ResponseWriter, _ *http.Request) {
+	s.mu.RLock()
+	wd := s.workDir
+	s.mu.RUnlock()
+
+	if wd == "" {
+		wd, _ = os.Getwd()
+	}
+
+	project := agent.DetectProject(wd)
+	writeJSON(w, map[string]any{
+		"path":    wd,
+		"project": project,
+	})
 }
 
 func (s *Server) handleRegisterProvider(w http.ResponseWriter, r *http.Request) {
@@ -982,6 +1115,11 @@ func (s *Server) handleAgentLoop(w http.ResponseWriter, r *http.Request) {
 	}
 
 	workDir := body.WorkDir
+	if workDir == "" {
+		s.mu.RLock()
+		workDir = s.workDir
+		s.mu.RUnlock()
+	}
 	if workDir == "" {
 		workDir, _ = os.Getwd()
 	}
