@@ -104,6 +104,12 @@ func ExecuteTool(name string, input json.RawMessage, workDir string) (string, bo
 		return result, isErr
 	}
 
+	// Try MCP tools
+	mcpResult, mcpErr := CallMCPTool(name, input)
+	if mcpResult != fmt.Sprintf("MCP tool '%s' not found", name) {
+		return mcpResult, mcpErr
+	}
+
 	// Base tools
 	switch name {
 	case "Bash":

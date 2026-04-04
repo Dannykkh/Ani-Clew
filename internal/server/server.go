@@ -162,6 +162,18 @@ func (s *Server) Start() error {
 	mux.HandleFunc("GET /api/context", s.handleProjectContext)
 	mux.HandleFunc("GET /api/skills", s.handleSkillsList)
 
+	// Slash commands
+	mux.HandleFunc("GET /api/commands", s.handleCommandsList)
+
+	// Plan mode
+	mux.HandleFunc("GET /api/plan", s.handlePlanGet)
+	mux.HandleFunc("POST /api/plan/approve", s.handlePlanApprove)
+
+	// MCP servers
+	mux.HandleFunc("GET /api/mcp", s.handleMCPList)
+	mux.HandleFunc("POST /api/mcp/connect", s.handleMCPConnect)
+	mux.HandleFunc("POST /api/mcp/disconnect", s.handleMCPDisconnect)
+
 	// Workspaces & Sessions
 	mux.HandleFunc("GET /api/workspaces", s.handleWorkspaceList)
 	mux.HandleFunc("GET /api/sessions", s.handleSessionList)
@@ -584,6 +596,62 @@ func (d *Server) handleKairosAutonomy(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(r.Body).Decode(&body)
 	daemon.SetAutonomy(body.Mode)
 	writeJSON(w, map[string]any{"ok": true, "autonomy": body.Mode})
+}
+
+// ── Slash Commands ──
+
+func (s *Server) handleCommandsList(w http.ResponseWriter, r *http.Request) {
+	workDir := r.URL.Query().Get("workDir")
+	if workDir == "" { workDir, _ = os.Getwd() }
+	skills := agent.LoadSkills(workDir)
+	commands := agent.ParseSlashCommands(skills)
+	writeJSON(w, commands)
+}
+
+// ── Plan Mode ──
+
+func (s *Server) handlePlanGet(w http.ResponseWriter, _ *http.Request) {
+	plan := agent.GetActivePlan()
+	if plan == nil {
+		writeJSON(w, map[string]string{"status": "no_plan"})
+		return
+	}
+	writeJSON(w, plan)
+}
+
+func (s *Server) handlePlanApprove(w http.ResponseWriter, _ *http.Request) {
+	result := agent.ApprovePlan()
+	writeJSON(w, map[string]string{"result": result})
+}
+
+// ── MCP Servers ──
+
+func (s *Server) handleMCPList(w http.ResponseWriter, r *http.Request) {
+	workDir := r.URL.Query().Get("workDir")
+	if workDir == "" { workDir, _ = os.Getwd() }
+	servers := agent.ListMCPServers(workDir)
+	mcpTools := agent.GetMCPTools()
+	writeJSON(w, map[string]any{
+		"servers": servers,
+		"tools":   len(mcpTools),
+	})
+}
+
+func (s *Server) handleMCPConnect(w http.ResponseWriter, r *http.Request) {
+	var body struct{ WorkDir string `json:"workDir"` }
+	json.NewDecoder(r.Body).Decode(&body)
+	if body.WorkDir == "" { body.WorkDir, _ = os.Getwd() }
+	count, err := agent.ConnectMCPServers(body.WorkDir)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"connected": count, "tools": len(agent.GetMCPTools())})
+}
+
+func (s *Server) handleMCPDisconnect(w http.ResponseWriter, _ *http.Request) {
+	agent.DisconnectAllMCP()
+	writeJSON(w, map[string]bool{"ok": true})
 }
 
 // ── Project Context & Skills ──

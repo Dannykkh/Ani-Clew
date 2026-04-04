@@ -62,6 +62,42 @@ func RunLoop(
 	skills := LoadSkills(workDir)
 	mcpConfig := LoadMCPConfig(workDir)
 
+	// ── Process slash commands ──
+	if len(messages) > 0 {
+		lastMsg := messages[len(messages)-1]
+		var lastText string
+		json.Unmarshal(lastMsg.Content, &lastText)
+		if IsSlashCommand(lastText) {
+			processed, err := ProcessSlashCommand(lastText, skills)
+			if err != nil {
+				eventCh <- Event{Type: "error", Data: err.Error()}
+				return
+			}
+			if processed == "[CLEAR_CHAT]" || processed == "[SHOW_MODEL_SELECTOR]" {
+				eventCh <- Event{Type: "command", Data: processed}
+				return
+			}
+			if processed == "[COMPACT_CONTEXT]" {
+				eventCh <- Event{Type: "status", Data: "Compressing context..."}
+				// Context compression will happen naturally below
+			}
+			// Replace last message with processed prompt
+			messages[len(messages)-1] = types.Message{
+				Role:    "user",
+				Content: mustJSON(processed),
+			}
+			eventCh <- Event{Type: "status", Data: "Skill loaded: " + lastText}
+		}
+	}
+
+	// ── Connect MCP servers ──
+	if mcpConfig != "" {
+		count, _ := ConnectMCPServers(workDir)
+		if count > 0 {
+			eventCh <- Event{Type: "status", Data: fmt.Sprintf("Connected to %d MCP servers", count)}
+		}
+	}
+
 	skillText := ""
 	if len(skills) > 0 {
 		skillText = "\n\n--- AVAILABLE SKILLS ---\n"
@@ -78,6 +114,37 @@ func RunLoop(
 	}
 
 	for i := 0; i < maxIterations; i++ {
+		// ── Context compression: estimate tokens and compress if needed ──
+		totalChars := len(projectCtx) + len(skillText)
+		for _, m := range messages {
+			totalChars += len(m.Content)
+		}
+		estimatedTokens := totalChars / 4
+
+		if estimatedTokens > 80000 && len(messages) > 6 {
+			eventCh <- Event{Type: "status", Data: fmt.Sprintf("Context large (~%dk tokens), compressing...", estimatedTokens/1000)}
+			// Keep first 2 messages (system context) and last 4 messages, summarize the middle
+			if len(messages) > 8 {
+				middle := make([]map[string]string, 0)
+				for _, m := range messages[2 : len(messages)-4] {
+					var text string
+					json.Unmarshal(m.Content, &text)
+					middle = append(middle, map[string]string{"role": m.Role, "content": text})
+				}
+				summary := CompressContext(middle)
+				summaryMsg := types.Message{
+					Role:    "user",
+					Content: mustJSON("[Context Summary]\n" + summary),
+				}
+				compressed := make([]types.Message, 0)
+				compressed = append(compressed, messages[:2]...)
+				compressed = append(compressed, summaryMsg)
+				compressed = append(compressed, messages[len(messages)-4:]...)
+				messages = compressed
+				eventCh <- Event{Type: "status", Data: fmt.Sprintf("Compressed to %d messages", len(messages))}
+			}
+		}
+
 		// Build request with full context
 		sysPrompt := buildSystemPrompt(responseLang) + projectCtx + skillText
 		req := &types.MessagesRequest{
