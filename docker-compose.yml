@@ -1,0 +1,37 @@
+version: "3.8"
+
+services:
+  # ── Ollama: Local LLM server ──
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]  # Remove if no GPU
+    restart: unless-stopped
+
+  # ── Claude Code Proxy ──
+  proxy:
+    build: .
+    container_name: claude-proxy
+    ports:
+      - "4000:4000"
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      # Add API keys as needed:
+      # - OPENAI_API_KEY=sk-...
+      # - GEMINI_API_KEY=AIza...
+      # - ANTHROPIC_API_KEY=sk-ant-...
+    command: ["--provider", "ollama", "--model", "qwen3:8b", "--port", "4000", "--router"]
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+volumes:
+  ollama-models:

@@ -1,0 +1,1000 @@
+package server
+
+import (
+	"embed"
+	"io/fs"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"sync"
+
+	"github.com/aniclew/aniclew/internal/agent"
+	"github.com/aniclew/aniclew/internal/gateway"
+	"github.com/aniclew/aniclew/internal/kairos"
+	"github.com/aniclew/aniclew/internal/providers"
+	"github.com/aniclew/aniclew/internal/router"
+	"github.com/aniclew/aniclew/internal/stream"
+	"github.com/aniclew/aniclew/internal/types"
+)
+
+//go:embed dashboard.html
+var dashboardHTML []byte
+
+//go:embed all:webdist
+var webFS embed.FS
+
+type Server struct {
+	mu             sync.RWMutex
+	activeProvider types.Provider
+	activeModel    string
+	responseLang   string // "ko", "en", "ja", "zh", "auto"
+	router         *router.Router
+	daemon         *kairos.Daemon
+	memory         *kairos.Memory
+	abTester       *kairos.ABTester
+	gw             *gateway.Gateway
+	sessions       *agent.SessionStore
+	port           int
+}
+
+func (s *Server) SetResponseLang(lang string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.responseLang = lang
+}
+
+func New(provider types.Provider, model string, port int) *Server {
+	return &Server{
+		activeProvider: provider,
+		activeModel:    model,
+		port:           port,
+	}
+}
+
+func (s *Server) SetProvider(p types.Provider, model string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.activeProvider = p
+	s.activeModel = model
+}
+
+func (s *Server) SetRouter(r *router.Router) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.router = r
+}
+
+func (s *Server) SetDaemon(d *kairos.Daemon) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.daemon = d
+}
+
+func (s *Server) GetDaemon() *kairos.Daemon {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.daemon
+}
+
+func (s *Server) SetMemory(m *kairos.Memory) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.memory = m
+}
+
+func (s *Server) SetABTester(t *kairos.ABTester) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.abTester = t
+}
+
+func (s *Server) SetGateway(g *gateway.Gateway) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.gw = g
+}
+
+func (s *Server) SetSessionStore(ss *agent.SessionStore) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessions = ss
+}
+
+func (s *Server) Start() error {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("POST /v1/messages", s.handleMessages)
+	mux.HandleFunc("POST /messages", s.handleMessages)
+	mux.HandleFunc("GET /dashboard", s.handleDashboard)
+
+	// React SPA — serve static files from embedded webdist
+	webSub, _ := fs.Sub(webFS, "webdist")
+	webHandler := http.FileServer(http.FS(webSub))
+	mux.HandleFunc("GET /app", func(w http.ResponseWriter, r *http.Request) {
+		r.URL.Path = "/"
+		webHandler.ServeHTTP(w, r)
+	})
+	mux.Handle("GET /assets/", webHandler)
+	mux.Handle("GET /favicon.svg", webHandler)
+	mux.Handle("GET /icons.svg", webHandler)
+	mux.HandleFunc("GET /api/providers", s.handleListProviders)
+	mux.HandleFunc("GET /api/config", s.handleGetConfig)
+	mux.HandleFunc("PUT /api/config", s.handleSetConfig)
+	mux.HandleFunc("GET /api/routes", s.handleGetRoutes)
+	mux.HandleFunc("PUT /api/routes", s.handleSetRoute)
+	mux.HandleFunc("GET /api/costs", s.handleGetCosts)
+	// KAIROS daemon
+	mux.HandleFunc("GET /api/kairos", s.handleKairosStatus)
+	mux.HandleFunc("POST /api/kairos/start", s.handleKairosStart)
+	mux.HandleFunc("POST /api/kairos/stop", s.handleKairosStop)
+	mux.HandleFunc("GET /api/kairos/tasks", s.handleKairosTasks)
+	mux.HandleFunc("POST /api/kairos/tasks", s.handleKairosAddTask)
+	mux.HandleFunc("DELETE /api/kairos/tasks", s.handleKairosRemoveTask)
+	mux.HandleFunc("GET /api/kairos/logs", s.handleKairosLogs)
+	mux.HandleFunc("PUT /api/kairos/autonomy", s.handleKairosAutonomy)
+
+	// Memory (AutoDream)
+	mux.HandleFunc("GET /api/memory", s.handleMemoryState)
+	mux.HandleFunc("POST /api/memory", s.handleMemoryAdd)
+	mux.HandleFunc("GET /api/memory/search", s.handleMemorySearch)
+	mux.HandleFunc("POST /api/memory/dream", s.handleMemoryDream)
+
+	// A/B Testing
+	mux.HandleFunc("POST /api/ab-test", s.handleABTestRun)
+	mux.HandleFunc("GET /api/ab-test", s.handleABTestResults)
+
+	// PR Auto-Reviewer (GitHub Webhook)
+	mux.HandleFunc("POST /api/webhook/github", s.handleGitHubWebhook)
+
+	// Team Gateway
+	mux.HandleFunc("GET /api/gateway/users", s.handleGatewayUsers)
+	mux.HandleFunc("POST /api/gateway/users", s.handleGatewayAddUser)
+	mux.HandleFunc("GET /api/gateway/audit", s.handleGatewayAudit)
+
+	// Agent loop (Claude Code-style coding agent)
+	mux.HandleFunc("POST /api/agent", s.handleAgentLoop)
+
+	// Project context
+	mux.HandleFunc("GET /api/context", s.handleProjectContext)
+	mux.HandleFunc("GET /api/skills", s.handleSkillsList)
+
+	// Workspaces & Sessions
+	mux.HandleFunc("GET /api/workspaces", s.handleWorkspaceList)
+	mux.HandleFunc("GET /api/sessions", s.handleSessionList)
+	mux.HandleFunc("POST /api/sessions", s.handleSessionSave)
+	mux.HandleFunc("GET /api/sessions/{id}", s.handleSessionGet)
+	mux.HandleFunc("DELETE /api/sessions/{id}", s.handleSessionDelete)
+	mux.HandleFunc("PUT /api/sessions/{id}", s.handleSessionRename)
+
+	mux.HandleFunc("GET /health", s.handleHealth)
+	mux.HandleFunc("GET /", s.handleRoot)
+
+	handler := corsMiddleware(mux)
+	addr := fmt.Sprintf(":%d", s.port)
+	log.Printf("Server listening on http://localhost:%d", s.port)
+	return http.ListenAndServe(addr, handler)
+}
+
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "*")
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(204)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// ── Messages Handler (core proxy logic) ──
+
+func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	activeProvider := s.activeProvider
+	activeModel := s.activeModel
+	rt := s.router
+	gw := s.gw
+	s.mu.RUnlock()
+
+	// ── Team Gateway auth check ──
+	var gwUser *gateway.User
+	if gw != nil {
+		user, err := gw.Authenticate(r)
+		if err != nil {
+			writeError(w, 401, err.Error())
+			return
+		}
+		if user != nil {
+			gwUser = user
+			if !gw.CheckBudget(user) {
+				writeError(w, 429, "Monthly budget exceeded. Contact admin.")
+				return
+			}
+		}
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, 400, "Failed to read body")
+		return
+	}
+
+	var req types.MessagesRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, 400, "Invalid JSON")
+		return
+	}
+
+	opts := &types.StreamOptions{IncomingHeaders: extractHeaders(r)}
+
+	// ── Smart Router or Direct ──
+	var provider types.Provider
+	var model string
+
+	if rt != nil {
+		decision := rt.Route(&req)
+		provider, err = rt.GetProvider(decision)
+		if err != nil {
+			log.Printf("Router provider error, falling back: %v", err)
+			provider = activeProvider
+			model = activeModel
+		} else {
+			model = decision.Model
+			log.Printf("→ [%s] %s/%s (%s) msgs=%d tools=%d",
+				decision.Role, decision.Provider, model, decision.Reason,
+				len(req.Messages), len(req.Tools))
+		}
+	} else {
+		provider = activeProvider
+		model = activeModel
+		log.Printf("→ %s/%s msgs=%d tools=%d", provider.Name(), model, len(req.Messages), len(req.Tools))
+	}
+
+	if provider == nil {
+		writeError(w, 500, "No provider configured")
+		return
+	}
+
+	req.Model = model
+
+	ch, err := provider.StreamMessage(r.Context(), &req, opts)
+	if err != nil {
+		// ── Fallback on failure ──
+		if rt != nil {
+			decision := rt.Route(&req)
+			fallback := rt.GetFallback(decision.Role)
+			if fallback != nil {
+				log.Printf("Escalating to fallback: %s/%s", fallback.Provider, fallback.Model)
+				fbProvider, fbErr := rt.GetProvider(router.RouteDecision{
+					Provider: fallback.Provider, Model: fallback.Model,
+				})
+				if fbErr == nil {
+					req.Model = fallback.Model
+					ch, err = fbProvider.StreamMessage(r.Context(), &req, opts)
+				}
+			}
+		}
+		if err != nil {
+			writeError(w, 502, err.Error())
+			return
+		}
+	}
+
+	// ── Stream SSE ──
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache, no-transform")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(200)
+
+	outputTokens := 0
+	for event := range ch {
+		if err := stream.WriteSSEEvent(w, event); err != nil {
+			break
+		}
+		// Track tokens
+		if event.Usage != nil {
+			outputTokens = event.Usage.OutputTokens
+		}
+		if event.Type == "message_stop" {
+			break
+		}
+	}
+
+	// Record cost
+	if rt != nil {
+		rt.TrackUsage(provider.Name(), model, outputTokens)
+	}
+
+	// Gateway audit
+	if gw != nil && gwUser != nil {
+		cost := float64(outputTokens) / 1_000_000 * 5 // rough estimate
+		gw.RecordUsage(gwUser.ID, provider.Name(), model, "", outputTokens, cost)
+	}
+}
+
+// ── Dashboard ──
+
+func (s *Server) handleDashboard(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(dashboardHTML)
+}
+
+// ── Provider List ──
+
+func (s *Server) handleListProviders(w http.ResponseWriter, _ *http.Request) {
+	type info struct {
+		Name        string            `json:"name"`
+		DisplayName string            `json:"displayName"`
+		Models      []types.ModelInfo `json:"models"`
+	}
+	var result []info
+	for _, name := range providers.ProviderOrder {
+		p, err := providers.Create(name, nil)
+		if err != nil {
+			continue
+		}
+		result = append(result, info{Name: p.Name(), DisplayName: p.DisplayName(), Models: p.Models()})
+	}
+	writeJSON(w, result)
+}
+
+// ── Config API ──
+
+func (s *Server) handleGetConfig(w http.ResponseWriter, _ *http.Request) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	writeJSON(w, map[string]any{
+		"provider":      s.activeProvider.Name(),
+		"model":         s.activeModel,
+		"routerEnabled": s.router != nil,
+		"responseLang":  s.responseLang,
+	})
+}
+
+func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
+	var update struct {
+		Provider      string `json:"provider"`
+		Model         string `json:"model"`
+		RouterEnabled *bool  `json:"routerEnabled"`
+		ResponseLang  string `json:"responseLang"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+		writeError(w, 400, "Invalid JSON")
+		return
+	}
+
+	if update.Provider != "" && update.Model != "" {
+		p, err := providers.Create(update.Provider, nil)
+		if err != nil {
+			writeError(w, 400, err.Error())
+			return
+		}
+		s.SetProvider(p, update.Model)
+		log.Printf("Provider switched → %s/%s", update.Provider, update.Model)
+	}
+
+	if update.ResponseLang != "" {
+		s.SetResponseLang(update.ResponseLang)
+		log.Printf("Response language set to: %s", update.ResponseLang)
+	}
+
+	if update.RouterEnabled != nil {
+		s.mu.Lock()
+		if *update.RouterEnabled && s.router == nil {
+			s.router = router.New(nil, nil)
+			log.Println("Smart Router enabled")
+		} else if !*update.RouterEnabled {
+			s.router = nil
+			log.Println("Smart Router disabled")
+		}
+		s.mu.Unlock()
+	}
+
+	s.mu.RLock()
+	writeJSON(w, map[string]any{
+		"ok":            true,
+		"provider":      s.activeProvider.Name(),
+		"model":         s.activeModel,
+		"routerEnabled": s.router != nil,
+	})
+	s.mu.RUnlock()
+}
+
+// ── Routes API ──
+
+func (s *Server) handleGetRoutes(w http.ResponseWriter, _ *http.Request) {
+	s.mu.RLock()
+	rt := s.router
+	s.mu.RUnlock()
+	if rt == nil {
+		writeJSON(w, map[string]string{"error": "Router not enabled"})
+		return
+	}
+	writeJSON(w, rt.GetConfig())
+}
+
+func (s *Server) handleSetRoute(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	rt := s.router
+	s.mu.RUnlock()
+	if rt == nil {
+		writeError(w, 400, "Router not enabled")
+		return
+	}
+
+	var update struct {
+		Role     string  `json:"role"`
+		Provider string  `json:"provider"`
+		Model    string  `json:"model"`
+		Fallback *router.Target `json:"fallback"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+		writeError(w, 400, "Invalid JSON")
+		return
+	}
+
+	rt.SetRule(router.RoleID(update.Role), update.Provider, update.Model, update.Fallback)
+	writeJSON(w, map[string]bool{"ok": true})
+}
+
+// ── Costs API ──
+
+func (s *Server) handleGetCosts(w http.ResponseWriter, _ *http.Request) {
+	s.mu.RLock()
+	rt := s.router
+	s.mu.RUnlock()
+	if rt == nil {
+		writeJSON(w, map[string]any{"total": 0, "breakdown": []any{}})
+		return
+	}
+	writeJSON(w, map[string]any{
+		"total":     rt.GetTotalCost(),
+		"breakdown": rt.GetCostSummary(),
+	})
+}
+
+// ── Health / Root ──
+
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	writeJSON(w, map[string]string{
+		"status": "ok", "provider": s.activeProvider.Name(), "model": s.activeModel,
+	})
+}
+
+func (s *Server) handleRoot(w http.ResponseWriter, _ *http.Request) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := map[string]any{
+		"name":     "aniclew",
+		"version":  "1.0.0",
+		"provider": s.activeProvider.Name(),
+		"model":    s.activeModel,
+		"router":   s.router != nil,
+		"hint":     fmt.Sprintf("Set ANTHROPIC_BASE_URL=http://localhost:%d to use with Claude Code", s.port),
+	}
+	if s.router != nil {
+		result["totalCost"] = fmt.Sprintf("$%.4f", s.router.GetTotalCost())
+	}
+	writeJSON(w, result)
+}
+
+// ── KAIROS Daemon API ──
+
+func (d *Server) handleKairosStatus(w http.ResponseWriter, _ *http.Request) {
+	daemon := d.GetDaemon()
+	if daemon == nil {
+		writeJSON(w, map[string]any{"enabled": false, "state": "not-initialized"})
+		return
+	}
+	cfg := daemon.GetConfig()
+	writeJSON(w, map[string]any{
+		"enabled":   cfg.Enabled,
+		"state":     daemon.GetState(),
+		"autonomy":  cfg.Autonomy,
+		"tasks":     len(daemon.GetTasks()),
+		"tickInterval": cfg.TickInterval.String(),
+	})
+}
+
+func (d *Server) handleKairosStart(w http.ResponseWriter, _ *http.Request) {
+	daemon := d.GetDaemon()
+	if daemon == nil {
+		cfg := kairos.DefaultDaemonConfig()
+		daemon = kairos.NewDaemon(cfg)
+		d.SetDaemon(daemon)
+	}
+	d.mu.RLock()
+	daemon.SetProvider(d.activeProvider, d.activeModel)
+	d.mu.RUnlock()
+	daemon.Start()
+	writeJSON(w, map[string]any{"ok": true, "state": "running"})
+}
+
+func (d *Server) handleKairosStop(w http.ResponseWriter, _ *http.Request) {
+	daemon := d.GetDaemon()
+	if daemon == nil {
+		writeError(w, 400, "Daemon not initialized")
+		return
+	}
+	daemon.Stop()
+	writeJSON(w, map[string]any{"ok": true, "state": "stopped"})
+}
+
+func (d *Server) handleKairosTasks(w http.ResponseWriter, _ *http.Request) {
+	daemon := d.GetDaemon()
+	if daemon == nil {
+		writeJSON(w, []any{})
+		return
+	}
+	writeJSON(w, daemon.GetTasks())
+}
+
+func (d *Server) handleKairosAddTask(w http.ResponseWriter, r *http.Request) {
+	daemon := d.GetDaemon()
+	if daemon == nil {
+		writeError(w, 400, "Daemon not initialized. Start KAIROS first.")
+		return
+	}
+	var task kairos.Task
+	if err := json.NewDecoder(r.Body).Decode(&task); err != nil {
+		writeError(w, 400, "Invalid JSON")
+		return
+	}
+	daemon.AddTask(task)
+	writeJSON(w, map[string]any{"ok": true, "tasks": len(daemon.GetTasks())})
+}
+
+func (d *Server) handleKairosRemoveTask(w http.ResponseWriter, r *http.Request) {
+	daemon := d.GetDaemon()
+	if daemon == nil {
+		writeError(w, 400, "Daemon not initialized")
+		return
+	}
+	var body struct{ ID string `json:"id"` }
+	json.NewDecoder(r.Body).Decode(&body)
+	daemon.RemoveTask(body.ID)
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func (d *Server) handleKairosLogs(w http.ResponseWriter, _ *http.Request) {
+	daemon := d.GetDaemon()
+	if daemon == nil {
+		writeJSON(w, []any{})
+		return
+	}
+	writeJSON(w, daemon.GetLogs(50))
+}
+
+func (d *Server) handleKairosAutonomy(w http.ResponseWriter, r *http.Request) {
+	daemon := d.GetDaemon()
+	if daemon == nil {
+		writeError(w, 400, "Daemon not initialized")
+		return
+	}
+	var body struct{ Mode string `json:"mode"` }
+	json.NewDecoder(r.Body).Decode(&body)
+	daemon.SetAutonomy(body.Mode)
+	writeJSON(w, map[string]any{"ok": true, "autonomy": body.Mode})
+}
+
+// ── Project Context & Skills ──
+
+func (s *Server) handleProjectContext(w http.ResponseWriter, r *http.Request) {
+	workDir := r.URL.Query().Get("workDir")
+	if workDir == "" {
+		workDir, _ = os.Getwd()
+	}
+	ctx := agent.LoadProjectContext(workDir)
+	mcpCfg := agent.LoadMCPConfig(workDir)
+	skills := agent.LoadSkills(workDir)
+
+	writeJSON(w, map[string]any{
+		"workDir":    workDir,
+		"context":    ctx,
+		"mcpConfig":  mcpCfg,
+		"skills":     len(skills),
+		"skillNames": func() []string {
+			names := make([]string, len(skills))
+			for i, s := range skills { names[i] = s.Name }
+			return names
+		}(),
+	})
+}
+
+func (s *Server) handleSkillsList(w http.ResponseWriter, r *http.Request) {
+	workDir := r.URL.Query().Get("workDir")
+	if workDir == "" {
+		workDir, _ = os.Getwd()
+	}
+	skills := agent.LoadSkills(workDir)
+	writeJSON(w, skills)
+}
+
+// ── Session Management ──
+
+func (s *Server) handleWorkspaceList(w http.ResponseWriter, _ *http.Request) {
+	s.mu.RLock()
+	store := s.sessions
+	s.mu.RUnlock()
+	if store == nil {
+		writeJSON(w, []any{})
+		return
+	}
+	writeJSON(w, store.ListWorkspaces())
+}
+
+func (s *Server) handleSessionList(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	store := s.sessions
+	s.mu.RUnlock()
+	if store == nil {
+		writeJSON(w, []any{})
+		return
+	}
+	workspace := r.URL.Query().Get("workspace")
+	if workspace != "" {
+		writeJSON(w, store.List(workspace))
+	} else {
+		writeJSON(w, store.ListAll())
+	}
+}
+
+func (s *Server) handleSessionGet(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	store := s.sessions
+	s.mu.RUnlock()
+	if store == nil {
+		writeError(w, 400, "Sessions not initialized")
+		return
+	}
+	id := r.PathValue("id")
+	sess, err := store.Get(id)
+	if err != nil {
+		writeError(w, 404, err.Error())
+		return
+	}
+	writeJSON(w, sess)
+}
+
+func (s *Server) handleSessionSave(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	store := s.sessions
+	prov := s.activeProvider
+	model := s.activeModel
+	s.mu.RUnlock()
+	if store == nil {
+		writeError(w, 400, "Sessions not initialized")
+		return
+	}
+	var sess agent.Session
+	if err := json.NewDecoder(r.Body).Decode(&sess); err != nil {
+		writeError(w, 400, "Invalid JSON")
+		return
+	}
+	if sess.Provider == "" {
+		sess.Provider = prov.Name()
+	}
+	if sess.Model == "" {
+		sess.Model = model
+	}
+	if err := store.Save(&sess); err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "id": sess.ID})
+}
+
+func (s *Server) handleSessionDelete(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	store := s.sessions
+	s.mu.RUnlock()
+	if store == nil {
+		writeError(w, 400, "Sessions not initialized")
+		return
+	}
+	id := r.PathValue("id")
+	store.Delete(id)
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func (s *Server) handleSessionRename(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	store := s.sessions
+	s.mu.RUnlock()
+	if store == nil {
+		writeError(w, 400, "Sessions not initialized")
+		return
+	}
+	id := r.PathValue("id")
+	var body struct{ Title string `json:"title"` }
+	json.NewDecoder(r.Body).Decode(&body)
+	if err := store.Rename(id, body.Title); err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// ── Agent Loop (Claude Code-style coding) ──
+
+func (s *Server) handleAgentLoop(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	provider := s.activeProvider
+	model := s.activeModel
+	s.mu.RUnlock()
+
+	if provider == nil {
+		writeError(w, 500, "No provider configured")
+		return
+	}
+
+	var body struct {
+		Messages     []types.Message `json:"messages"`
+		WorkDir      string          `json:"workDir"`
+		ResponseLang string          `json:"responseLang"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, 400, "Invalid JSON")
+		return
+	}
+
+	workDir := body.WorkDir
+	if workDir == "" {
+		workDir, _ = os.Getwd()
+	}
+
+	s.mu.RLock()
+	respLang := body.ResponseLang
+	if respLang == "" {
+		respLang = s.responseLang
+	}
+	if respLang == "" {
+		respLang = "auto"
+	}
+	s.mu.RUnlock()
+
+	// SSE response
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache, no-transform")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(200)
+
+	eventCh := make(chan agent.Event, 64)
+
+	go agent.RunLoop(r.Context(), provider, model, body.Messages, workDir, respLang, eventCh)
+
+	for event := range eventCh {
+		data, _ := json.Marshal(event)
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+	}
+
+	fmt.Fprintf(w, "data: {\"type\":\"stream_end\"}\n\n")
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// ── Memory (AutoDream) API ──
+
+func (s *Server) handleMemoryState(w http.ResponseWriter, _ *http.Request) {
+	s.mu.RLock()
+	mem := s.memory
+	s.mu.RUnlock()
+	if mem == nil {
+		writeJSON(w, map[string]string{"error": "Memory not initialized"})
+		return
+	}
+	writeJSON(w, mem.GetState())
+}
+
+func (s *Server) handleMemoryAdd(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	mem := s.memory
+	s.mu.RUnlock()
+	if mem == nil {
+		writeError(w, 400, "Memory not initialized")
+		return
+	}
+	var entry kairos.MemoryEntry
+	if err := json.NewDecoder(r.Body).Decode(&entry); err != nil {
+		writeError(w, 400, "Invalid JSON")
+		return
+	}
+	mem.AddEntry(entry)
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func (s *Server) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	mem := s.memory
+	s.mu.RUnlock()
+	if mem == nil {
+		writeJSON(w, []any{})
+		return
+	}
+	q := r.URL.Query().Get("q")
+	writeJSON(w, mem.Search(q))
+}
+
+func (s *Server) handleMemoryDream(w http.ResponseWriter, _ *http.Request) {
+	s.mu.RLock()
+	mem := s.memory
+	provider := s.activeProvider
+	s.mu.RUnlock()
+	if mem == nil {
+		writeError(w, 400, "Memory not initialized")
+		return
+	}
+	mem.Dream(provider)
+	writeJSON(w, map[string]any{"ok": true, "state": mem.GetState()})
+}
+
+// ── A/B Testing API ──
+
+func (s *Server) handleABTestRun(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	ab := s.abTester
+	s.mu.RUnlock()
+	if ab == nil {
+		writeError(w, 400, "A/B tester not initialized")
+		return
+	}
+
+	var body struct {
+		Prompt    string `json:"prompt"`
+		ProviderA string `json:"providerA"`
+		ModelA    string `json:"modelA"`
+		ProviderB string `json:"providerB"`
+		ModelB    string `json:"modelB"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, 400, "Invalid JSON")
+		return
+	}
+
+	pA, err := providers.Create(body.ProviderA, nil)
+	if err != nil {
+		writeError(w, 400, "Invalid providerA: "+err.Error())
+		return
+	}
+	pB, err := providers.Create(body.ProviderB, nil)
+	if err != nil {
+		writeError(w, 400, "Invalid providerB: "+err.Error())
+		return
+	}
+
+	result := ab.RunTest(r.Context(), body.Prompt, pA, body.ModelA, pB, body.ModelB)
+	writeJSON(w, result)
+}
+
+func (s *Server) handleABTestResults(w http.ResponseWriter, _ *http.Request) {
+	s.mu.RLock()
+	ab := s.abTester
+	s.mu.RUnlock()
+	if ab == nil {
+		writeJSON(w, []any{})
+		return
+	}
+	writeJSON(w, ab.GetResults(20))
+}
+
+// ── PR Auto-Reviewer (GitHub Webhook) ──
+
+func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	provider := s.activeProvider
+	model := s.activeModel
+	s.mu.RUnlock()
+
+	if provider == nil {
+		writeError(w, 500, "No provider configured")
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, 400, "Failed to read body")
+		return
+	}
+
+	event := r.Header.Get("X-GitHub-Event")
+	if event != "pull_request" {
+		writeJSON(w, map[string]string{"status": "ignored", "event": event})
+		return
+	}
+
+	result, err := kairos.HandlePRWebhook(r.Context(), body, provider, model)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	if result == nil {
+		writeJSON(w, map[string]string{"status": "skipped"})
+		return
+	}
+	writeJSON(w, result)
+}
+
+// ── Team Gateway API ──
+
+func (s *Server) handleGatewayUsers(w http.ResponseWriter, _ *http.Request) {
+	s.mu.RLock()
+	gw := s.gw
+	s.mu.RUnlock()
+	if gw == nil {
+		writeJSON(w, []any{})
+		return
+	}
+	writeJSON(w, gw.GetUsers())
+}
+
+func (s *Server) handleGatewayAddUser(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	gw := s.gw
+	s.mu.RUnlock()
+	if gw == nil {
+		writeError(w, 400, "Gateway not initialized")
+		return
+	}
+	var body struct {
+		Name     string   `json:"name"`
+		Role     string   `json:"role"`
+		Budget   float64  `json:"budget"`
+		Allowed  []string `json:"allowedProviders"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, 400, "Invalid JSON")
+		return
+	}
+	user := gw.AddUser(body.Name, body.Role, body.Budget, body.Allowed)
+	writeJSON(w, user)
+}
+
+func (s *Server) handleGatewayAudit(w http.ResponseWriter, _ *http.Request) {
+	s.mu.RLock()
+	gw := s.gw
+	s.mu.RUnlock()
+	if gw == nil {
+		writeJSON(w, []any{})
+		return
+	}
+	writeJSON(w, gw.GetAudit(50))
+}
+
+// ── Helpers ──
+
+func extractHeaders(r *http.Request) map[string]string {
+	h := map[string]string{}
+	for _, key := range []string{"authorization", "x-api-key", "anthropic-beta", "x-app", "user-agent", "x-claude-code-session-id"} {
+		if v := r.Header.Get(key); v != "" {
+			h[strings.ToLower(key)] = v
+		}
+	}
+	return h
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(v)
+}
+
+func writeError(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]any{
+		"type":  "error",
+		"error": map[string]string{"type": "api_error", "message": msg},
+	})
+}

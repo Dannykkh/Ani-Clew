@@ -1,0 +1,1136 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Code Proxy — Dashboard</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #232733;
+    --border: #2e3343;
+    --text: #e4e6ed;
+    --text2: #8b8fa3;
+    --accent: #6c8cff;
+    --accent2: #4a6adf;
+    --green: #34d399;
+    --yellow: #fbbf24;
+    --red: #f87171;
+    --orange: #fb923c;
+    --radius: 10px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  /* ── Header ── */
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  .logo-icon {
+    width: 32px;
+    height: 32px;
+    background: linear-gradient(135deg, var(--accent), #a78bfa);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+  }
+
+  .status-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .status-badge.online {
+    background: rgba(52, 211, 153, 0.12);
+    color: var(--green);
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  /* ── Layout ── */
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 24px;
+  }
+
+  /* ── Stats Cards ── */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+  }
+
+  .stat-label {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text2);
+    margin-bottom: 8px;
+  }
+
+  .stat-value {
+    font-size: 28px;
+    font-weight: 700;
+  }
+
+  .stat-value.green { color: var(--green); }
+  .stat-value.accent { color: var(--accent); }
+  .stat-value.yellow { color: var(--yellow); }
+
+  .stat-sub {
+    font-size: 12px;
+    color: var(--text2);
+    margin-top: 4px;
+  }
+
+  /* ── Tabs ── */
+  .tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 20px;
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 4px;
+    border: 1px solid var(--border);
+  }
+
+  .tab {
+    padding: 10px 20px;
+    border-radius: 7px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text2);
+    transition: all 0.2s;
+    border: none;
+    background: none;
+  }
+
+  .tab:hover { color: var(--text); background: var(--surface2); }
+  .tab.active { color: var(--text); background: var(--surface2); }
+
+  /* ── Panel ── */
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  /* ── Table ── */
+  .table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  th {
+    text-align: left;
+    padding: 12px 16px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text2);
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+  }
+
+  td {
+    padding: 12px 16px;
+    font-size: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(108, 140, 255, 0.04); }
+
+  .role-tag {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    background: rgba(108, 140, 255, 0.12);
+    color: var(--accent);
+  }
+
+  .role-tag.local {
+    background: rgba(52, 211, 153, 0.12);
+    color: var(--green);
+  }
+
+  .role-tag.cloud {
+    background: rgba(251, 191, 36, 0.12);
+    color: var(--yellow);
+  }
+
+  .role-tag.premium {
+    background: rgba(248, 113, 113, 0.12);
+    color: var(--red);
+  }
+
+  .provider-cell {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .provider-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+
+  .provider-dot.ollama { background: var(--green); }
+  .provider-dot.openai { background: var(--accent); }
+  .provider-dot.anthropic { background: var(--orange); }
+  .provider-dot.gemini { background: var(--yellow); }
+  .provider-dot.groq { background: #e879f9; }
+
+  /* ── Edit Controls ── */
+  .edit-btn {
+    padding: 5px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.2s;
+  }
+
+  .edit-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  select.inline-select {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 5px 8px;
+    border-radius: 6px;
+    font-size: 13px;
+  }
+
+  input.inline-input {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 5px 8px;
+    border-radius: 6px;
+    font-size: 13px;
+    width: 180px;
+  }
+
+  .save-btn {
+    padding: 5px 14px;
+    border-radius: 6px;
+    border: none;
+    background: var(--accent);
+    color: white;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .save-btn:hover { background: var(--accent2); }
+
+  .cancel-btn {
+    padding: 5px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: none;
+    color: var(--text2);
+    cursor: pointer;
+    font-size: 12px;
+  }
+
+  /* ── Cost Bar Chart ── */
+  .cost-bar-wrap {
+    margin: 8px 0;
+  }
+
+  .cost-bar {
+    height: 24px;
+    border-radius: 4px;
+    background: rgba(108, 140, 255, 0.2);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .cost-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.5s;
+  }
+
+  .cost-bar-label {
+    font-size: 11px;
+    color: var(--text2);
+    margin-top: 2px;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  /* ── Connect Info ── */
+  .connect-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 24px;
+  }
+
+  .connect-box h3 {
+    font-size: 14px;
+    margin-bottom: 12px;
+    color: var(--text2);
+  }
+
+  .connect-cmd {
+    background: var(--bg);
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 13px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    border: 1px solid var(--border);
+  }
+
+  .connect-cmd code {
+    color: var(--green);
+  }
+
+  .copy-btn {
+    padding: 4px 10px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text2);
+    cursor: pointer;
+    font-size: 11px;
+  }
+
+  .copy-btn:hover { color: var(--text); }
+  .copy-btn.copied { color: var(--green); border-color: var(--green); }
+
+  /* ── Logs ── */
+  .log-area {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 12px;
+    line-height: 1.8;
+    max-height: 500px;
+    overflow-y: auto;
+    color: var(--text2);
+  }
+
+  .log-line {
+    display: flex;
+    gap: 8px;
+  }
+
+  .log-time { color: var(--text2); min-width: 85px; }
+  .log-role { font-weight: 600; min-width: 100px; }
+  .log-role.local { color: var(--green); }
+  .log-role.cloud { color: var(--accent); }
+  .log-role.premium { color: var(--orange); }
+  .log-msg { color: var(--text); }
+
+  /* ── Settings Panel ── */
+  .settings-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+
+  .settings-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+  }
+
+  .settings-card h3 {
+    font-size: 15px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .form-group {
+    margin-bottom: 16px;
+  }
+
+  .form-label {
+    display: block;
+    font-size: 12px;
+    color: var(--text2);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .form-select {
+    width: 100%;
+    padding: 10px 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 14px;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238b8fa3' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+  }
+
+  .form-select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .toggle-row:last-child { border-bottom: none; }
+
+  .toggle-label {
+    font-size: 14px;
+  }
+
+  .toggle-sub {
+    font-size: 12px;
+    color: var(--text2);
+    margin-top: 2px;
+  }
+
+  .toggle {
+    position: relative;
+    width: 44px;
+    height: 24px;
+    flex-shrink: 0;
+  }
+
+  .toggle input { opacity: 0; width: 0; height: 0; }
+
+  .toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    inset: 0;
+    background: var(--surface2);
+    border-radius: 24px;
+    border: 1px solid var(--border);
+    transition: 0.3s;
+  }
+
+  .toggle-slider:before {
+    content: '';
+    position: absolute;
+    height: 18px;
+    width: 18px;
+    left: 2px;
+    bottom: 2px;
+    background: var(--text2);
+    border-radius: 50%;
+    transition: 0.3s;
+  }
+
+  .toggle input:checked + .toggle-slider {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .toggle input:checked + .toggle-slider:before {
+    transform: translateX(20px);
+    background: white;
+  }
+
+  .apply-btn {
+    width: 100%;
+    padding: 12px;
+    border-radius: 8px;
+    border: none;
+    background: var(--accent);
+    color: white;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 8px;
+    transition: background 0.2s;
+  }
+
+  .apply-btn:hover { background: var(--accent2); }
+
+  .apply-btn.success {
+    background: var(--green);
+  }
+
+  .model-preview {
+    margin-top: 12px;
+    padding: 12px;
+    background: var(--bg);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-size: 13px;
+  }
+
+  .model-preview .mp-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+  }
+
+  .model-preview .mp-label { color: var(--text2); }
+  .model-preview .mp-value { color: var(--text); font-weight: 500; }
+
+  @media (max-width: 768px) {
+    .settings-grid { grid-template-columns: 1fr; }
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 768px) {
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .container { padding: 12px; }
+    header { padding: 12px 16px; }
+    .tabs { overflow-x: auto; }
+  }
+</style>
+</head>
+<body>
+  <header>
+    <div class="logo">
+      <div class="logo-icon">P</div>
+      <span>Claude Code Proxy</span>
+    </div>
+    <div class="status-badge online" id="statusBadge">
+      <div class="status-dot"></div>
+      <span id="statusText">Online</span>
+    </div>
+  </header>
+
+  <div class="container">
+
+    <!-- Stats Cards -->
+    <div class="stats">
+      <div class="stat-card">
+        <div class="stat-label">Total Cost</div>
+        <div class="stat-value green" id="totalCost">$0.00</div>
+        <div class="stat-sub" id="savingsText">vs direct Opus: calculating...</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Requests</div>
+        <div class="stat-value accent" id="totalRequests">0</div>
+        <div class="stat-sub" id="requestsSub">across 0 models</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Active Provider</div>
+        <div class="stat-value" id="activeProvider" style="font-size:20px">—</div>
+        <div class="stat-sub" id="activeModel">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Router</div>
+        <div class="stat-value" id="routerStatus" style="font-size:20px">—</div>
+        <div class="stat-sub" id="routerSub">—</div>
+      </div>
+    </div>
+
+    <!-- Connect Info -->
+    <div class="connect-box">
+      <h3>Connect Claude Code</h3>
+      <div class="connect-cmd">
+        <code id="connectCmd">ANTHROPIC_BASE_URL=http://localhost:4001 claude</code>
+        <button class="copy-btn" onclick="copyCmd(this)">Copy</button>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('settings')">Settings</button>
+      <button class="tab" onclick="switchTab('routes')">Routing Rules</button>
+      <button class="tab" onclick="switchTab('costs')">Cost Breakdown</button>
+      <button class="tab" onclick="switchTab('logs')">Live Logs</button>
+    </div>
+
+    <!-- Settings Panel -->
+    <div class="panel active" id="panel-settings">
+      <div class="settings-grid">
+        <!-- Left: Default Provider/Model -->
+        <div class="settings-card">
+          <h3>Default Provider / Model</h3>
+          <div class="form-group">
+            <label class="form-label">Provider</label>
+            <select class="form-select" id="settingsProvider" onchange="onSettingsProviderChange()">
+              <option value="">Loading...</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Model</label>
+            <select class="form-select" id="settingsModel">
+              <option value="">Select provider first</option>
+            </select>
+          </div>
+          <div class="model-preview" id="modelPreview">
+            <div class="mp-row"><span class="mp-label">Current</span><span class="mp-value" id="previewCurrent">—</span></div>
+            <div class="mp-row"><span class="mp-label">Will change to</span><span class="mp-value" id="previewNew">—</span></div>
+          </div>
+          <button class="apply-btn" id="applyProviderBtn" onclick="applyProvider()">Apply Changes</button>
+        </div>
+
+        <!-- Right: Router & Options -->
+        <div class="settings-card">
+          <h3>Options</h3>
+          <div class="toggle-row">
+            <div>
+              <div class="toggle-label">Smart Router</div>
+              <div class="toggle-sub">Auto-route by task role (explain→local, debug→Gemini, etc.)</div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="toggleRouter" onchange="toggleRouter()">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="toggle-row">
+            <div>
+              <div class="toggle-label">Auto Escalate</div>
+              <div class="toggle-sub">On failure, automatically try fallback model</div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="toggleEscalate" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="toggle-row">
+            <div>
+              <div class="toggle-label">Auth Passthrough</div>
+              <div class="toggle-sub">Forward Claude Code login tokens (OAuth/API key)</div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" checked disabled>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
+          <h3 style="margin-top:20px">Role → Model Quick Assign</h3>
+          <div class="form-group">
+            <label class="form-label">Role</label>
+            <select class="form-select" id="quickRole">
+              <option value="">Select role...</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Assign Provider</label>
+            <select class="form-select" id="quickProvider" onchange="onQuickProviderChange()">
+              <option value="">Select provider...</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Assign Model</label>
+            <select class="form-select" id="quickModel">
+              <option value="">Select model...</option>
+            </select>
+          </div>
+          <button class="apply-btn" onclick="applyQuickAssign()">Assign Role</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Routes Panel -->
+    <div class="panel" id="panel-routes">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Role</th>
+              <th>Provider</th>
+              <th>Model</th>
+              <th>Fallback</th>
+              <th style="width:80px">Action</th>
+            </tr>
+          </thead>
+          <tbody id="routesBody">
+            <tr><td colspan="5" style="text-align:center;color:var(--text2)">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Cost Panel -->
+    <div class="panel" id="panel-costs">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Provider / Model</th>
+              <th>Requests</th>
+              <th>Tokens</th>
+              <th>Cost</th>
+              <th>Share</th>
+            </tr>
+          </thead>
+          <tbody id="costsBody">
+            <tr><td colspan="5" style="text-align:center;color:var(--text2)">No requests yet</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Logs Panel -->
+    <div class="panel" id="panel-logs">
+      <div class="log-area" id="logArea">
+        <div class="log-line">
+          <span class="log-time">--:--:--</span>
+          <span class="log-msg">Waiting for requests...</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+<script>
+const API = window.location.origin;
+const providers = ['ollama','openai','anthropic','gemini','groq','github-copilot','zai'];
+let routingRules = [];
+let editingRole = null;
+let logs = [];
+
+// ── Tab switching ──
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelector(`[onclick="switchTab('${name}')"]`).classList.add('active');
+  document.getElementById(`panel-${name}`).classList.add('active');
+}
+
+// ── Copy command ──
+function copyCmd(btn) {
+  const text = document.getElementById('connectCmd').textContent;
+  navigator.clipboard.writeText(text);
+  btn.textContent = 'Copied!';
+  btn.classList.add('copied');
+  setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000);
+}
+
+// ── Role tier classification ──
+function getRoleTier(provider) {
+  if (provider === 'ollama') return 'local';
+  if (provider === 'anthropic') return 'premium';
+  return 'cloud';
+}
+
+// ── Settings: Provider/Model management ──
+let allProviders = [];
+
+async function loadProviders() {
+  try {
+    const res = await fetch(`${API}/api/providers`);
+    allProviders = await res.json();
+    populateProviderSelects();
+  } catch (e) { console.error('Failed to load providers:', e); }
+}
+
+function populateProviderSelects() {
+  const selects = ['settingsProvider', 'quickProvider'];
+  for (const id of selects) {
+    const sel = document.getElementById(id);
+    sel.innerHTML = '<option value="">Select provider...</option>' +
+      allProviders.map(p => `<option value="${p.name}">${p.displayName}</option>`).join('');
+  }
+}
+
+function onSettingsProviderChange() {
+  const provName = document.getElementById('settingsProvider').value;
+  const modelSel = document.getElementById('settingsModel');
+  const prov = allProviders.find(p => p.name === provName);
+  if (!prov) {
+    modelSel.innerHTML = '<option value="">Select provider first</option>';
+    return;
+  }
+  modelSel.innerHTML = prov.models.map(m =>
+    `<option value="${m.id}">${m.displayName} (${m.id})</option>`
+  ).join('') + '<option value="__custom">Custom model ID...</option>';
+  updatePreview();
+}
+
+function onQuickProviderChange() {
+  const provName = document.getElementById('quickProvider').value;
+  const modelSel = document.getElementById('quickModel');
+  const prov = allProviders.find(p => p.name === provName);
+  if (!prov) { modelSel.innerHTML = '<option value="">Select provider...</option>'; return; }
+  modelSel.innerHTML = prov.models.map(m =>
+    `<option value="${m.id}">${m.displayName} (${m.id})</option>`
+  ).join('') + '<option value="__custom">Custom model ID...</option>';
+}
+
+function updatePreview() {
+  const prov = document.getElementById('settingsProvider').value;
+  const model = document.getElementById('settingsModel').value;
+  document.getElementById('previewNew').textContent = prov && model ? `${prov} / ${model}` : '—';
+}
+
+document.getElementById('settingsModel')?.addEventListener('change', updatePreview);
+
+async function applyProvider() {
+  const provider = document.getElementById('settingsProvider').value;
+  let model = document.getElementById('settingsModel').value;
+  const btn = document.getElementById('applyProviderBtn');
+
+  if (!provider || !model) { alert('Select provider and model'); return; }
+
+  if (model === '__custom') {
+    model = prompt('Enter custom model ID:');
+    if (!model) return;
+  }
+
+  try {
+    const res = await fetch(`${API}/api/config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, model }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      btn.textContent = 'Applied!';
+      btn.classList.add('success');
+      addLog('system', `Provider switched → ${provider}/${model}`);
+      setTimeout(() => { btn.textContent = 'Apply Changes'; btn.classList.remove('success'); }, 2000);
+      await refresh();
+    }
+  } catch (e) { alert('Failed: ' + e.message); }
+}
+
+async function toggleRouter() {
+  const enabled = document.getElementById('toggleRouter').checked;
+  await fetch(`${API}/api/config`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ routerEnabled: enabled }),
+  });
+  addLog('system', `Smart Router ${enabled ? 'enabled' : 'disabled'}`);
+  await refresh();
+}
+
+async function applyQuickAssign() {
+  const role = document.getElementById('quickRole').value;
+  const provider = document.getElementById('quickProvider').value;
+  let model = document.getElementById('quickModel').value;
+  if (!role || !provider || !model) { alert('Select all fields'); return; }
+  if (model === '__custom') {
+    model = prompt('Enter custom model ID:');
+    if (!model) return;
+  }
+  try {
+    await fetch(`${API}/api/routes`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role, provider, model }),
+    });
+    addLog('system', `Role [${role}] → ${provider}/${model}`);
+    await loadRoutes();
+    // Flash success
+    const btn = event.target;
+    btn.textContent = 'Assigned!';
+    btn.classList.add('success');
+    setTimeout(() => { btn.textContent = 'Assign Role'; btn.classList.remove('success'); }, 2000);
+  } catch (e) { alert('Failed: ' + e.message); }
+}
+
+function populateQuickRoles() {
+  const sel = document.getElementById('quickRole');
+  const roles = ['bash-only','file-read','file-edit','multi-file-edit','agent-spawn',
+    'explain','generate','refactor','debug','review','test','commit',
+    'short-context','medium-context','long-context','default'];
+  sel.innerHTML = '<option value="">Select role...</option>' +
+    roles.map(r => `<option value="${r}">${r}</option>`).join('');
+}
+
+async function loadConfig() {
+  try {
+    const res = await fetch(`${API}/api/config`);
+    const data = await res.json();
+    document.getElementById('previewCurrent').textContent =
+      data.provider && data.model ? `${data.provider} / ${data.model}` : '—';
+    document.getElementById('toggleRouter').checked = data.routerEnabled ?? false;
+  } catch (e) {}
+}
+
+// ── Fetch and render routes ──
+async function loadRoutes() {
+  try {
+    const res = await fetch(`${API}/api/routes`);
+    const data = await res.json();
+    if (data.error) {
+      document.getElementById('routerStatus').textContent = 'Disabled';
+      document.getElementById('routerSub').textContent = 'Single model mode';
+      return;
+    }
+    routingRules = data.rules || [];
+    document.getElementById('routerStatus').textContent = data.enabled ? 'Enabled' : 'Disabled';
+    document.getElementById('routerSub').textContent = `${routingRules.length} rules configured`;
+    renderRoutes();
+  } catch (e) {
+    console.error('Failed to load routes:', e);
+  }
+}
+
+function renderRoutes() {
+  const tbody = document.getElementById('routesBody');
+  if (routingRules.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text2)">No rules configured</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = routingRules.map(rule => {
+    const tier = getRoleTier(rule.provider);
+    const isEditing = editingRole === rule.role;
+
+    if (isEditing) {
+      return `<tr>
+        <td><span class="role-tag">${rule.role}</span></td>
+        <td>
+          <select class="inline-select" id="edit-provider" onchange="onProviderChange()">
+            ${providers.map(p => `<option value="${p}" ${p===rule.provider?'selected':''}>${p}</option>`).join('')}
+          </select>
+        </td>
+        <td><input class="inline-input" id="edit-model" value="${rule.model}"></td>
+        <td><input class="inline-input" id="edit-fallback" value="${rule.fallback ? rule.fallback.provider+'/'+rule.fallback.model : ''}" placeholder="provider/model"></td>
+        <td>
+          <button class="save-btn" onclick="saveRule('${rule.role}')">Save</button>
+          <button class="cancel-btn" onclick="cancelEdit()">X</button>
+        </td>
+      </tr>`;
+    }
+
+    return `<tr>
+      <td><span class="role-tag ${tier}">${rule.role}</span></td>
+      <td>
+        <div class="provider-cell">
+          <div class="provider-dot ${rule.provider}"></div>
+          ${rule.provider}
+        </div>
+      </td>
+      <td style="font-family:monospace;font-size:13px">${rule.model}</td>
+      <td style="font-size:12px;color:var(--text2)">${rule.fallback ? rule.fallback.provider+'/'+rule.fallback.model : '—'}</td>
+      <td><button class="edit-btn" onclick="startEdit('${rule.role}')">Edit</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function startEdit(role) {
+  editingRole = role;
+  renderRoutes();
+}
+
+function cancelEdit() {
+  editingRole = null;
+  renderRoutes();
+}
+
+async function saveRule(role) {
+  const provider = document.getElementById('edit-provider').value;
+  const model = document.getElementById('edit-model').value;
+  const fallbackStr = document.getElementById('edit-fallback').value;
+
+  const body = { role, provider, model };
+  if (fallbackStr && fallbackStr.includes('/')) {
+    const [fp, fm] = fallbackStr.split('/');
+    body.fallback = { provider: fp, model: fm };
+  }
+
+  try {
+    await fetch(`${API}/api/routes`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    editingRole = null;
+    addLog('system', `Rule updated: [${role}] → ${provider}/${model}`);
+    await loadRoutes();
+  } catch (e) {
+    alert('Failed to save: ' + e.message);
+  }
+}
+
+// ── Fetch and render costs ──
+async function loadCosts() {
+  try {
+    const res = await fetch(`${API}/api/costs`);
+    const data = await res.json();
+    if (data.error) return;
+
+    const total = data.total || 0;
+    const breakdown = data.breakdown || [];
+
+    // Stats
+    document.getElementById('totalCost').textContent = `$${total.toFixed(4)}`;
+    const totalReqs = breakdown.reduce((s, b) => s + b.requests, 0);
+    document.getElementById('totalRequests').textContent = totalReqs.toLocaleString();
+    document.getElementById('requestsSub').textContent = `across ${breakdown.length} models`;
+
+    // Savings estimate (Opus @ $75/1M output tokens)
+    const totalTokens = breakdown.reduce((s, b) => s + b.tokens, 0);
+    const opusCost = (totalTokens / 1000000) * 75;
+    if (opusCost > 0) {
+      const pct = ((1 - total / opusCost) * 100).toFixed(1);
+      document.getElementById('savingsText').textContent = `vs Opus: $${opusCost.toFixed(2)} (${pct}% saved)`;
+    }
+
+    // Cost table
+    const tbody = document.getElementById('costsBody');
+    if (breakdown.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text2)">No requests yet</td></tr>';
+      return;
+    }
+
+    const maxCost = Math.max(...breakdown.map(b => b.cost), 0.001);
+    tbody.innerHTML = breakdown.map(b => {
+      const pct = total > 0 ? ((b.cost / total) * 100).toFixed(1) : '0';
+      const barPct = (b.cost / maxCost * 100).toFixed(0);
+      const tier = getRoleTier(b.provider);
+      const barColor = tier === 'local' ? 'var(--green)' : tier === 'premium' ? 'var(--orange)' : 'var(--accent)';
+
+      return `<tr>
+        <td>
+          <div class="provider-cell">
+            <div class="provider-dot ${b.provider}"></div>
+            ${b.provider}/${b.model}
+          </div>
+        </td>
+        <td>${b.requests}</td>
+        <td>${b.tokens.toLocaleString()}</td>
+        <td>$${b.cost.toFixed(4)}</td>
+        <td style="min-width:120px">
+          <div class="cost-bar-wrap">
+            <div class="cost-bar">
+              <div class="cost-bar-fill" style="width:${barPct}%;background:${barColor}"></div>
+            </div>
+            <div class="cost-bar-label"><span>${pct}%</span></div>
+          </div>
+        </td>
+      </tr>`;
+    }).join('');
+  } catch (e) {
+    console.error('Failed to load costs:', e);
+  }
+}
+
+// ── Fetch server info ──
+async function loadInfo() {
+  try {
+    const res = await fetch(`${API}/`);
+    const data = await res.json();
+    document.getElementById('activeProvider').textContent = data.provider || '—';
+    document.getElementById('activeModel').textContent = data.model || '—';
+
+    const host = window.location.hostname;
+    const port = window.location.port;
+    document.getElementById('connectCmd').textContent =
+      `ANTHROPIC_BASE_URL=http://${host}:${port} claude`;
+  } catch (e) {
+    document.getElementById('statusText').textContent = 'Offline';
+    document.getElementById('statusBadge').classList.remove('online');
+  }
+}
+
+// ── Logs ──
+function addLog(role, msg) {
+  const now = new Date().toLocaleTimeString('en', { hour12: false });
+  const tier = role === 'system' ? 'cloud' : getRoleTier(role);
+  logs.push({ time: now, role, msg, tier });
+  if (logs.length > 200) logs.shift();
+  renderLogs();
+}
+
+function renderLogs() {
+  const area = document.getElementById('logArea');
+  area.innerHTML = logs.map(l =>
+    `<div class="log-line">
+      <span class="log-time">${l.time}</span>
+      <span class="log-role ${l.tier}">${l.role}</span>
+      <span class="log-msg">${l.msg}</span>
+    </div>`
+  ).join('');
+  area.scrollTop = area.scrollHeight;
+}
+
+// ── Polling ──
+async function refresh() {
+  await Promise.all([loadInfo(), loadRoutes(), loadCosts(), loadConfig()]);
+}
+
+// Initial load
+loadProviders();
+populateQuickRoles();
+refresh();
+addLog('system', 'Dashboard connected');
+
+// Auto-refresh every 5 seconds
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
