@@ -221,7 +221,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("POST /api/gateway/users", s.handleGatewayAddUser)
 	mux.HandleFunc("GET /api/gateway/audit", s.handleGatewayAudit)
 
-	// Agent loop (Claude Code-style coding agent)
+	// Agent loop (coding agent)
 	mux.HandleFunc("POST /api/agent", s.handleAgentLoop)
 
 	// Image upload
@@ -993,7 +993,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, _ *http.Request) {
 		"provider": s.activeProvider.Name(),
 		"model":    s.activeModel,
 		"router":   s.router != nil,
-		"hint":     fmt.Sprintf("Set ANTHROPIC_BASE_URL=http://localhost:%d to use with Claude Code", s.port),
+		"hint":     fmt.Sprintf("Set ANTHROPIC_BASE_URL=http://localhost:%d to use with your CLI tool", s.port),
 	}
 	if s.router != nil {
 		result["totalCost"] = fmt.Sprintf("$%.4f", s.router.GetTotalCost())
@@ -1572,7 +1572,7 @@ func (s *Server) handleSessionRename(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
 }
 
-// ── Agent Loop (Claude Code-style coding) ──
+// ── Agent Loop ──
 
 func (s *Server) handleAgentLoop(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()

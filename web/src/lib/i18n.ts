@@ -22,7 +22,7 @@ const translations = {
   'chat.title': { ko: '코딩 에이전트', en: 'Coding Agent' },
   'chat.turns': { ko: '턴', en: 'turns' },
   'chat.welcome': { ko: 'AniClew 코딩 에이전트', en: 'AniClew Coding Agent' },
-  'chat.welcomeSub': { ko: '파일 읽기, 코드 작성, 명령 실행 — Claude Code처럼.', en: 'Reads files, writes code, runs commands — just like Claude Code.' },
+  'chat.welcomeSub': { ko: '파일 읽기, 코드 작성, 명령 실행 — 코딩 에이전트.', en: 'Reads files, writes code, runs commands — your coding agent.' },
   'chat.tools': { ko: '도구: Bash, Read, Write, Edit, Glob, Grep', en: 'Tools: Bash, Read, Write, Edit, Glob, Grep' },
   'chat.placeholder': { ko: 'AniClew에게 코딩 요청... (Enter로 전송)', en: 'Ask AniClew to code... (Enter to send)' },
   'chat.send': { ko: '전송', en: 'Send' },
@@ -44,7 +44,7 @@ const translations = {
   'settings.smartRouter': { ko: '스마트 라우터', en: 'Smart Router' },
   'settings.smartRouterDesc': { ko: '작업 유형별 자동 라우팅', en: 'Auto-route requests by task role' },
   'settings.authPass': { ko: '인증 패스스루', en: 'Auth Passthrough' },
-  'settings.authPassDesc': { ko: 'Claude Code OAuth 토큰 전달', en: 'Forward Claude Code OAuth tokens' },
+  'settings.authPassDesc': { ko: 'CLI OAuth 토큰 전달', en: 'Forward CLI OAuth tokens' },
   'settings.language': { ko: '언어 / Language', en: 'Language / 언어' },
 
   // ── Routes ──

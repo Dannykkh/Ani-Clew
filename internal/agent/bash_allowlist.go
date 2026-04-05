@@ -26,7 +26,7 @@ type CommandConfig struct {
 }
 
 // ReadOnlyAllowlist returns configs for commands considered read-only.
-// Based on Claude Code's readOnlyValidation.ts (~1,991 lines).
+// Comprehensive read-only command allowlist.
 func ReadOnlyAllowlist() map[string]CommandConfig {
 	return map[string]CommandConfig{
 		// ── File listing / info ──

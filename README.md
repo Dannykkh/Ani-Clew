@@ -1,6 +1,6 @@
 # AniClew
 
-**Any Model, One Agent** — LLM Harness that unifies Claude Code, Codex CLI, and Gemini CLI under a single proxy with a web dashboard.
+**Any Model, One Agent** — LLM Harness that unifies Claude CLI, Codex CLI, and Gemini CLI under a single proxy with a web dashboard.
 
 AniClew sits between your coding CLI tools and LLM providers, giving you multi-provider routing, per-project management, background automation, and a visual control plane.
 
@@ -22,12 +22,12 @@ AniClew sits between your coding CLI tools and LLM providers, giving you multi-p
 
 ### Multi-Provider Proxy
 - **7 providers**: Anthropic, OpenAI, Gemini, Groq, Ollama, GitHub Copilot, z.ai (Grok)
-- **Auth passthrough**: Claude Code, Codex CLI, Gemini CLI send their own API keys through AniClew transparently
+- **Auth passthrough**: Claude CLI, Codex CLI, Gemini CLI send their own API keys through AniClew transparently
 - **Runtime switching**: Change provider/model without restarting
 - **Smart router**: Auto-route requests by role (coding, review, chat)
 
 ### Coding Agent
-- **Tool-using agent**: Bash, Read, Write, Edit, Glob, Grep — like Claude Code in a browser
+- **Tool-using agent**: Bash, Read, Write, Edit, Glob, Grep — coding agent in a browser
 - **Thinking model support**: qwen3, DeepSeek-R1 reasoning displayed in collapsible blocks
 - **Streaming**: Real-time token streaming with Anthropic SSE format translation
 - **Session management**: Per-project chat history with auto-save
@@ -98,7 +98,7 @@ The browser opens automatically at `http://localhost:4000/app`.
 ### Connect CLI Tools
 
 ```bash
-# Claude Code
+# Claude CLI
 ANTHROPIC_BASE_URL=http://localhost:4000 claude
 
 # Codex CLI

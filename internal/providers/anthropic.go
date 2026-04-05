@@ -59,7 +59,7 @@ func (p *AnthropicProvider) StreamMessage(ctx context.Context, req *types.Messag
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("anthropic-version", "2023-06-01")
 
-	// ── Auth passthrough: forward original Claude Code headers ──
+	// ── Auth passthrough: forward original client headers ──
 	incoming := map[string]string{}
 	if opts != nil && opts.IncomingHeaders != nil {
 		incoming = opts.IncomingHeaders

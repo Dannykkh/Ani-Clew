@@ -5,7 +5,7 @@ import (
 )
 
 // IsConcurrencySafe checks if a tool call can run in parallel.
-// Based on Claude Code's semantic analysis pattern.
+// Semantic analysis for concurrency safety.
 func IsConcurrencySafe(toolName string, input map[string]interface{}) bool {
 	switch toolName {
 	// Always safe: read-only tools

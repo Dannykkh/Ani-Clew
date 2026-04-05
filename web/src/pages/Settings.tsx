@@ -158,7 +158,7 @@ export function SettingsPage() {
           <div className="flex gap-2 flex-wrap">
             {[
               { id: 'all', label: 'All (전체)' },
-              { id: 'claude', label: 'Claude Code' },
+              { id: 'claude', label: 'Claude CLI' },
               { id: 'codex', label: 'Codex CLI' },
               { id: 'gemini', label: 'Gemini CLI' },
               { id: 'none', label: 'None (없음)' },
