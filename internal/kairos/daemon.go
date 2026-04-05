@@ -355,10 +355,20 @@ func (d *Daemon) activeTasks() []Task {
 }
 
 func (d *Daemon) isTaskDue(task Task, now time.Time) bool {
-	if task.LastRun.IsZero() {
-		return true // never run
+	// Built-in tasks (git-watch): run every tick
+	if task.Type == "git-watch" {
+		return task.LastRun.IsZero() || now.Sub(task.LastRun) > d.config.TickInterval
 	}
-	// Simple interval check (cron parsing would go here)
+
+	// Cron-based scheduling
+	if task.CronExpr != "" {
+		return IsDue(task.CronExpr, task.LastRun, now)
+	}
+
+	// No cron: run every tick interval
+	if task.LastRun.IsZero() {
+		return true
+	}
 	return now.Sub(task.LastRun) > d.config.TickInterval
 }
 

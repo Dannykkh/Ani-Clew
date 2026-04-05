@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { fetchJSON, postJSON, putJSON } from '../lib/api';
 
 export function KairosPage() {
@@ -6,12 +6,33 @@ export function KairosPage() {
   const [tasks, setTasks] = useState<any[]>([]);
   const [logs, setLogs] = useState<any[]>([]);
   const [gitStatus, setGitStatus] = useState<any>(null);
+  const [notifications, setNotifications] = useState<any[]>([]);
   const [newTask, setNewTask] = useState({ id: '', type: 'custom', description: '' });
+  const sseRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
     load();
     const interval = setInterval(load, 5000);
-    return () => clearInterval(interval);
+
+    // SSE for real-time notifications
+    const sse = new EventSource('/api/kairos/notifications/stream');
+    sseRef.current = sse;
+    sse.onmessage = (event) => {
+      try {
+        const notif = JSON.parse(event.data);
+        setNotifications(prev => [...prev.slice(-19), notif]);
+        // Also trigger a data refresh
+        load();
+      } catch { /* skip */ }
+    };
+    sse.onerror = () => {
+      // Reconnect handled by browser automatically
+    };
+
+    return () => {
+      clearInterval(interval);
+      sse.close();
+    };
   }, []);
 
   async function load() {
@@ -145,6 +166,21 @@ export function KairosPage() {
                 <span className="text-sm ml-2">{t.description}</span>
               </div>
               <span className="text-xs text-[var(--color-text2)]">{t.type}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Live Notifications */}
+      {notifications.length > 0 && (
+        <div className="bg-[var(--color-surface)] border border-[var(--color-accent)]/30 rounded-xl p-4 mb-4">
+          <div className="text-xs text-[var(--color-accent)] uppercase mb-2">Live Notifications</div>
+          {notifications.slice().reverse().slice(0, 5).map((n: any, i: number) => (
+            <div key={i} className="flex items-center gap-2 py-1 text-xs">
+              <span className="w-2 h-2 rounded-full bg-[var(--color-accent)] animate-pulse shrink-0" />
+              <span className="text-[var(--color-text2)]">{new Date(n.timestamp).toLocaleTimeString()}</span>
+              <span className="font-medium">{n.title}</span>
+              <span className="text-[var(--color-text2)] truncate">{n.message}</span>
             </div>
           ))}
         </div>

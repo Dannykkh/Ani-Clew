@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+
 // PermissionRule defines an allow/deny rule.
 type PermissionRule struct {
 	Tool    string `json:"tool"`              // tool name or "*"
@@ -19,6 +20,66 @@ type PermissionSnapshot struct {
 	AllowRules []PermissionRule `json:"allowRules"`
 	DenyRules  []PermissionRule `json:"denyRules"`
 	Mode       string           `json:"mode"` // "default", "bypassPermissions", "dontAsk", "acceptEdits"
+}
+
+// PersistAllowRule saves an "always allow" decision for future sessions.
+func PersistAllowRule(workDir string, tool string, pattern string) error {
+	path := filepath.Join(workDir, ".claude", "settings.json")
+	os.MkdirAll(filepath.Dir(path), 0755)
+
+	// Load existing
+	data, _ := os.ReadFile(path)
+	var settings map[string]interface{}
+	if len(data) > 0 {
+		json.Unmarshal(data, &settings)
+	}
+	if settings == nil {
+		settings = make(map[string]interface{})
+	}
+
+	// Add permission
+	perms, _ := settings["permissions"].(map[string]interface{})
+	if perms == nil {
+		perms = make(map[string]interface{})
+	}
+	allowList, _ := perms["allow"].([]interface{})
+	allowList = append(allowList, map[string]interface{}{
+		"tool": tool, "pattern": pattern,
+	})
+	perms["allow"] = allowList
+	settings["permissions"] = perms
+
+	out, _ := json.MarshalIndent(settings, "", "  ")
+	return os.WriteFile(path, out, 0644)
+}
+
+// PersistDenyRule saves an "always deny" decision.
+func PersistDenyRule(workDir string, tool string, pattern string) error {
+	path := filepath.Join(workDir, ".claude", "settings.json")
+	os.MkdirAll(filepath.Dir(path), 0755)
+
+	data, _ := os.ReadFile(path)
+	var settings map[string]interface{}
+	if len(data) > 0 {
+		json.Unmarshal(data, &settings)
+	}
+	if settings == nil {
+		settings = make(map[string]interface{})
+	}
+
+	perms, _ := settings["permissions"].(map[string]interface{})
+	if perms == nil {
+		perms = make(map[string]interface{})
+	}
+	denyList, _ := perms["deny"].([]interface{})
+	denyList = append(denyList, map[string]interface{}{
+		"tool": tool, "pattern": pattern,
+	})
+	perms["deny"] = denyList
+	settings["permissions"] = perms
+
+	out, _ := json.MarshalIndent(settings, "", "  ")
+	return os.WriteFile(path, out, 0644)
 }
 
 // Decide returns "allow", "deny", or "ask" for a tool+input combination.
