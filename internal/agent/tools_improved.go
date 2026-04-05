@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,51 +9,13 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"time"
 )
 
 // ── Improved Bash: configurable timeout, env vars, background ──
 
 func executeBashV2(input json.RawMessage, workDir string) (string, bool) {
-	var args struct {
-		Command   string `json:"command"`
-		Timeout   int    `json:"timeout"`      // seconds, default 120
-		Env       map[string]string `json:"env"` // extra env vars
-	}
-	json.Unmarshal(input, &args)
-
-	timeout := 120 * time.Second
-	if args.Timeout > 0 {
-		timeout = time.Duration(args.Timeout) * time.Second
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "bash", "-c", args.Command)
-	cmd.Dir = workDir
-	cmd.Env = os.Environ()
-	for k, v := range args.Env {
-		cmd.Env = append(cmd.Env, k+"="+v)
-	}
-
-	start := time.Now()
-	out, err := cmd.CombinedOutput()
-	elapsed := time.Since(start)
-
-	result := string(out)
-	if len(result) > 100000 {
-		result = result[:50000] + "\n\n... (middle truncated) ...\n\n" + result[len(result)-10000:]
-	}
-
-	footer := fmt.Sprintf("\n[%s | %.1fs]", workDir, elapsed.Seconds())
-	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return result + fmt.Sprintf("\n[TIMEOUT after %ds]", int(timeout.Seconds())), true
-		}
-		return result + "\n[exit: " + err.Error() + "]" + footer, true
-	}
-	return result + footer, false
+	result := ExecuteBashDeep(input, workDir, nil)
+	return result.Output, result.IsError
 }
 
 // ── Improved Read: auto-detect binary, image info, better formatting ──
