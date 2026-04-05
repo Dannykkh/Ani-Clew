@@ -324,9 +324,21 @@ export function ChatPage({ loadSessionId, onSessionLoaded }: ChatPageProps) {
               }
               if (msg.content === '') return null;
               return (
-                <div key={i} className="flex justify-start">
+                <div key={i} className="flex justify-start group">
                   <div className="max-w-[95%] bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl rounded-bl-sm px-4 py-3 text-sm">
                     <div className="chat-md"><Markdown content={msg.content} /></div>
+                    <div className="flex gap-1 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => fetch('/api/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messageId: i, rating: 'up', model: 'current' }) })}
+                        className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[var(--color-surface2)] text-[var(--color-text2)]"
+                        title="Good response"
+                      >+1</button>
+                      <button
+                        onClick={() => fetch('/api/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messageId: i, rating: 'down', model: 'current' }) })}
+                        className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[var(--color-surface2)] text-[var(--color-text2)]"
+                        title="Bad response"
+                      >-1</button>
+                    </div>
                   </div>
                 </div>
               );

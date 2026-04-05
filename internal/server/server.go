@@ -14,11 +14,13 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/aniclew/aniclew/internal/agent"
 	"github.com/aniclew/aniclew/internal/config"
 	"github.com/aniclew/aniclew/internal/gateway"
 	"github.com/aniclew/aniclew/internal/kairos"
+	"github.com/aniclew/aniclew/internal/observability"
 	"github.com/aniclew/aniclew/internal/providers"
 	"github.com/aniclew/aniclew/internal/router"
 	"github.com/aniclew/aniclew/internal/stream"
@@ -42,8 +44,22 @@ type Server struct {
 	abTester       *kairos.ABTester
 	gw             *gateway.Gateway
 	sessions       *agent.SessionStore
+	tracker        *observability.Tracker
+	feedback       *observability.FeedbackStore
 	workDir        string // current workspace
 	port           int
+}
+
+func (s *Server) SetTracker(t *observability.Tracker) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tracker = t
+}
+
+func (s *Server) SetFeedback(f *observability.FeedbackStore) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.feedback = f
 }
 
 func (s *Server) SetResponseLang(lang string) {
@@ -162,6 +178,12 @@ func (s *Server) Start() error {
 	mux.HandleFunc("PUT /api/routes", s.handleSetRoute)
 	mux.HandleFunc("GET /api/costs", s.handleGetCosts)
 	// KAIROS daemon
+	// Observability
+	mux.HandleFunc("GET /api/traces", s.handleTraces)
+	mux.HandleFunc("GET /api/metrics", s.handleMetrics)
+	mux.HandleFunc("POST /api/feedback", s.handleAddFeedback)
+	mux.HandleFunc("GET /api/feedback", s.handleFeedbackStats)
+
 	mux.HandleFunc("GET /api/kairos", s.handleKairosStatus)
 	mux.HandleFunc("POST /api/kairos/start", s.handleKairosStart)
 	mux.HandleFunc("POST /api/kairos/stop", s.handleKairosStop)
@@ -340,7 +362,18 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	startTime := time.Now()
 	opts := &types.StreamOptions{IncomingHeaders: extractHeaders(r)}
+
+	// Detect source from headers
+	source := "api"
+	if ua := r.Header.Get("User-Agent"); strings.Contains(ua, "claude") {
+		source = "claude"
+	} else if strings.Contains(ua, "codex") || strings.Contains(ua, "openai") {
+		source = "codex"
+	} else if r.Header.Get("Referer") != "" {
+		source = "web"
+	}
 
 	// ── Smart Router or Direct ──
 	var provider types.Provider
@@ -425,6 +458,29 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	if gw != nil && gwUser != nil {
 		cost := float64(outputTokens) / 1_000_000 * 5 // rough estimate
 		gw.RecordUsage(gwUser.ID, provider.Name(), model, "", outputTokens, cost)
+	}
+
+	// Observability trace
+	s.mu.RLock()
+	tracker := s.tracker
+	wd := s.workDir
+	s.mu.RUnlock()
+	if tracker != nil {
+		latency := time.Since(startTime).Milliseconds()
+		cost := float64(outputTokens) / 1_000_000 * 5
+		tracker.Record(observability.RequestTrace{
+			ID:           fmt.Sprintf("req_%d", startTime.UnixNano()),
+			Timestamp:    startTime,
+			Provider:     provider.Name(),
+			Model:        model,
+			LatencyMs:    latency,
+			InputTokens:  len(req.Messages) * 100, // estimate
+			OutputTokens: outputTokens,
+			Cost:         cost,
+			Status:       "ok",
+			Source:       source,
+			WorkDir:      wd,
+		})
 	}
 }
 
@@ -1085,6 +1141,64 @@ func (d *Server) handleKairosWebhook(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(r.Body).Decode(&body)
 	daemon.Notifier().SetWebhook(body.URL)
 	writeJSON(w, map[string]any{"ok": true, "webhook": body.URL})
+}
+
+func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	tracker := s.tracker
+	s.mu.RUnlock()
+	if tracker == nil {
+		writeJSON(w, []any{})
+		return
+	}
+	limit := 50
+	if q := r.URL.Query().Get("limit"); q != "" {
+		fmt.Sscanf(q, "%d", &limit)
+	}
+	writeJSON(w, tracker.Recent(limit))
+}
+
+func (s *Server) handleAddFeedback(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	fb := s.feedback
+	s.mu.RUnlock()
+	if fb == nil {
+		writeError(w, 500, "Feedback not initialized")
+		return
+	}
+	var body observability.Feedback
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, 400, "Invalid JSON")
+		return
+	}
+	fb.Add(body)
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func (s *Server) handleFeedbackStats(w http.ResponseWriter, _ *http.Request) {
+	s.mu.RLock()
+	fb := s.feedback
+	s.mu.RUnlock()
+	if fb == nil {
+		writeJSON(w, map[string]any{})
+		return
+	}
+	writeJSON(w, fb.Stats())
+}
+
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	tracker := s.tracker
+	s.mu.RUnlock()
+	if tracker == nil {
+		writeJSON(w, map[string]any{})
+		return
+	}
+	window := 60 // default 1 hour
+	if q := r.URL.Query().Get("window"); q != "" {
+		fmt.Sscanf(q, "%d", &window)
+	}
+	writeJSON(w, tracker.Compute(window))
 }
 
 func (d *Server) handleKairosGitStatus(w http.ResponseWriter, _ *http.Request) {

@@ -11,7 +11,7 @@ const items: NavItem[] = [
   { id: 'chat', label: 'Chat', labelKo: '채팅', section: 'top' },
   { id: 'files', label: 'Files', labelKo: '파일', section: 'top' },
   { id: 'routes', label: 'Routes', labelKo: '라우팅', section: 'top' },
-  { id: 'costs', label: 'Costs', labelKo: '비용', section: 'bottom' },
+  { id: 'costs', label: 'Observe', labelKo: '관측', section: 'bottom' },
   { id: 'kairos', label: 'Daemon', labelKo: '데몬', section: 'bottom' },
   { id: 'settings', label: 'Settings', labelKo: '설정', section: 'bottom' },
 ];
