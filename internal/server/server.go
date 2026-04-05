@@ -223,6 +223,7 @@ func (s *Server) Start() error {
 
 	// Agent loop (coding agent)
 	mux.HandleFunc("POST /api/agent", s.handleAgentLoop)
+	mux.HandleFunc("POST /api/chronos", s.handleChronos)
 
 	// Image upload
 	mux.HandleFunc("POST /api/upload", s.handleImageUpload)
@@ -1649,6 +1650,69 @@ func (s *Server) handleAgentLoop(w http.ResponseWriter, r *http.Request) {
 	eventCh := make(chan agent.Event, 64)
 
 	go agent.RunLoop(r.Context(), provider, model, body.Messages, workDir, respLang, eventCh)
+
+	for event := range eventCh {
+		data, _ := json.Marshal(event)
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+	}
+
+	fmt.Fprintf(w, "data: {\"type\":\"stream_end\"}\n\n")
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// ── Chronos (Autonomous Loop) ──
+
+func (s *Server) handleChronos(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	provider := s.activeProvider
+	model := s.activeModel
+	workDir := s.workDir
+	s.mu.RUnlock()
+
+	if provider == nil {
+		writeError(w, 500, "No provider configured")
+		return
+	}
+
+	var body struct {
+		Task          string `json:"task"`
+		VerifyCommand string `json:"verifyCommand"`
+		MaxCycles     int    `json:"maxCycles"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, 400, "Invalid JSON")
+		return
+	}
+
+	if body.Task == "" {
+		writeError(w, 400, "task is required")
+		return
+	}
+	if workDir == "" {
+		workDir, _ = os.Getwd()
+	}
+
+	cfg := agent.DefaultChronosConfig()
+	if body.VerifyCommand != "" {
+		cfg.VerifyCommand = body.VerifyCommand
+	}
+	if body.MaxCycles > 0 {
+		cfg.MaxCycles = body.MaxCycles
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache, no-transform")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(200)
+
+	eventCh := make(chan agent.Event, 64)
+
+	go agent.RunChronos(r.Context(), provider, model, body.Task, workDir, cfg, eventCh)
 
 	for event := range eventCh {
 		data, _ := json.Marshal(event)
