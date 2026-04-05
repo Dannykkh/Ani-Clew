@@ -224,6 +224,7 @@ func (s *Server) Start() error {
 	// Agent loop (coding agent)
 	mux.HandleFunc("POST /api/agent", s.handleAgentLoop)
 	mux.HandleFunc("POST /api/chronos", s.handleChronos)
+	mux.HandleFunc("POST /api/team", s.handleTeamExecute)
 
 	// Image upload
 	mux.HandleFunc("POST /api/upload", s.handleImageUpload)
@@ -1236,6 +1237,11 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAddFeedback(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
 	fb := s.feedback
+	currentModel := s.activeModel
+	currentProvider := ""
+	if s.activeProvider != nil {
+		currentProvider = s.activeProvider.Name()
+	}
 	s.mu.RUnlock()
 	if fb == nil {
 		writeError(w, 500, "Feedback not initialized")
@@ -1246,8 +1252,15 @@ func (s *Server) handleAddFeedback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "Invalid JSON")
 		return
 	}
+	// Auto-fill model if not specified
+	if body.Model == "" || body.Model == "auto" {
+		body.Model = currentModel
+	}
+	if body.Provider == "" {
+		body.Provider = currentProvider
+	}
 	fb.Add(body)
-	writeJSON(w, map[string]any{"ok": true})
+	writeJSON(w, map[string]any{"ok": true, "model": body.Model})
 }
 
 func (s *Server) handleFeedbackStats(w http.ResponseWriter, _ *http.Request) {
@@ -1662,6 +1675,100 @@ func (s *Server) handleAgentLoop(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "data: {\"type\":\"stream_end\"}\n\n")
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
+	}
+}
+
+// ── Team Execution ──
+
+func (s *Server) handleTeamExecute(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	provider := s.activeProvider
+	model := s.activeModel
+	workDir := s.workDir
+	s.mu.RUnlock()
+
+	if provider == nil {
+		writeError(w, 500, "No provider configured")
+		return
+	}
+
+	var body struct {
+		Name          string `json:"name"`
+		VerifyCommand string `json:"verifyCommand"`
+		Tasks         []struct {
+			ID          string   `json:"id"`
+			Name        string   `json:"name"`
+			Description string   `json:"description"`
+			Files       []string `json:"files"`
+			DependsOn   []string `json:"dependsOn"`
+		} `json:"tasks"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, 400, "Invalid JSON")
+		return
+	}
+
+	if len(body.Tasks) == 0 {
+		writeError(w, 400, "At least one task required")
+		return
+	}
+	if workDir == "" {
+		workDir, _ = os.Getwd()
+	}
+
+	home, _ := os.UserHomeDir()
+	baseDir := filepath.Join(home, ".claude-proxy")
+
+	team := agent.NewTeam(provider, model, workDir, baseDir, agent.TeamConfig{
+		Name:          body.Name,
+		VerifyCommand: body.VerifyCommand,
+	})
+
+	for _, t := range body.Tasks {
+		team.AddTask(agent.TeamTask{
+			ID:          t.ID,
+			Name:        t.Name,
+			Description: t.Description,
+			Files:       t.Files,
+			DependsOn:   t.DependsOn,
+		})
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache, no-transform")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(200)
+
+	eventCh := make(chan agent.Event, 64)
+
+	go func() {
+		defer close(eventCh)
+
+		if err := team.ExecuteWaves(r.Context(), eventCh); err != nil {
+			eventCh <- agent.Event{Type: "error", Data: err.Error()}
+		}
+
+		// Verify if command configured
+		if body.VerifyCommand != "" {
+			passed, detail := team.Verify(r.Context())
+			if passed {
+				eventCh <- agent.Event{Type: "status", Data: "Verification PASSED"}
+			} else {
+				eventCh <- agent.Event{Type: "status", Data: "Verification FAILED: " + detail}
+			}
+		}
+
+		eventCh <- agent.Event{Type: "text", Data: "\n\n" + team.Summary()}
+		team.Shutdown()
+		eventCh <- agent.Event{Type: "done", Data: nil}
+	}()
+
+	for event := range eventCh {
+		data, _ := json.Marshal(event)
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
 	}
 }
 

@@ -1,0 +1,496 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/aniclew/aniclew/internal/types"
+)
+
+// ── Team: Lead/Worker orchestration with Wave execution ──
+
+// TeamConfig holds team-level settings.
+type TeamConfig struct {
+	Name          string        `json:"name"`
+	MaxWaveSize   int           `json:"maxWaveSize"`   // max agents per wave (default 5)
+	CycleTimeout  time.Duration `json:"cycleTimeout"`  // per-wave timeout
+	VerifyCommand string        `json:"verifyCommand"` // verification command
+}
+
+// TeamTask represents a task with dependencies.
+type TeamTask struct {
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Description  string    `json:"description"`
+	Files        []string  `json:"files"`       // owned files (exclusive)
+	DependsOn    []string  `json:"dependsOn"`   // task IDs that must complete first
+	Status       string    `json:"status"`       // pending, running, completed, failed
+	AssignedTo   string    `json:"assignedTo"`   // worker agent ID
+	Result       string    `json:"result,omitempty"`
+	ToolCalls    int       `json:"toolCalls"`
+	Wave         int       `json:"wave"`         // computed wave number
+	CreatedAt    time.Time `json:"createdAt"`
+	StartedAt    time.Time `json:"startedAt,omitempty"`
+	FinishedAt   time.Time `json:"finishedAt,omitempty"`
+}
+
+// Team manages the Lead/Worker orchestration.
+type Team struct {
+	mu       sync.RWMutex
+	config   TeamConfig
+	tasks    []*TeamTask
+	workers  map[string]*workerState
+	mailbox  *Mailbox
+	provider types.Provider
+	model    string
+	workDir  string
+	baseDir  string
+	eventCh  chan<- Event // report progress to caller
+}
+
+type workerState struct {
+	ID       string
+	Name     string
+	TaskID   string
+	Status   string // running, idle, shutdown
+	StartedAt time.Time
+	cancel   context.CancelFunc
+}
+
+// NewTeam creates a team orchestrator.
+func NewTeam(provider types.Provider, model, workDir, baseDir string, cfg TeamConfig) *Team {
+	if cfg.MaxWaveSize <= 0 {
+		cfg.MaxWaveSize = 5
+	}
+	if cfg.CycleTimeout <= 0 {
+		cfg.CycleTimeout = 5 * time.Minute
+	}
+	return &Team{
+		config:   cfg,
+		tasks:    make([]*TeamTask, 0),
+		workers:  make(map[string]*workerState),
+		mailbox:  NewMailbox(filepath.Join(baseDir, "teams", cfg.Name)),
+		provider: provider,
+		model:    model,
+		workDir:  workDir,
+		baseDir:  baseDir,
+	}
+}
+
+// AddTask registers a task with dependencies.
+func (t *Team) AddTask(task TeamTask) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	task.Status = "pending"
+	task.CreatedAt = time.Now()
+	t.tasks = append(t.tasks, &task)
+}
+
+// ── Wave Computation (Topological Sort) ──
+
+// ComputeWaves assigns wave numbers based on dependency graph.
+func (t *Team) ComputeWaves() ([][]string, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	taskMap := make(map[string]*TeamTask)
+	for _, task := range t.tasks {
+		taskMap[task.ID] = task
+	}
+
+	// Kahn's algorithm
+	inDegree := make(map[string]int)
+	dependents := make(map[string][]string) // task → tasks that depend on it
+
+	for _, task := range t.tasks {
+		if _, ok := inDegree[task.ID]; !ok {
+			inDegree[task.ID] = 0
+		}
+		for _, dep := range task.DependsOn {
+			inDegree[task.ID]++
+			dependents[dep] = append(dependents[dep], task.ID)
+		}
+	}
+
+	// Find initial wave (no dependencies)
+	var waves [][]string
+	wave := 0
+
+	for len(inDegree) > 0 {
+		var current []string
+		for id, deg := range inDegree {
+			if deg == 0 {
+				current = append(current, id)
+			}
+		}
+
+		if len(current) == 0 {
+			return nil, fmt.Errorf("circular dependency detected")
+		}
+
+		sort.Strings(current)
+
+		// Split if wave too large
+		for i := 0; i < len(current); i += t.config.MaxWaveSize {
+			end := i + t.config.MaxWaveSize
+			if end > len(current) {
+				end = len(current)
+			}
+			subWave := current[i:end]
+			waves = append(waves, subWave)
+
+			for _, id := range subWave {
+				if task, ok := taskMap[id]; ok {
+					task.Wave = wave
+				}
+			}
+			wave++
+		}
+
+		// Remove processed and update degrees
+		for _, id := range current {
+			delete(inDegree, id)
+			for _, dep := range dependents[id] {
+				inDegree[dep]--
+			}
+		}
+	}
+
+	return waves, nil
+}
+
+// ── File Ownership Enforcement ──
+
+// CheckFileOwnership validates that a file isn't owned by another active worker.
+func (t *Team) CheckFileOwnership(workerID string, filePath string) (bool, string) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	for _, task := range t.tasks {
+		if task.AssignedTo == workerID || task.Status != "running" {
+			continue
+		}
+		for _, owned := range task.Files {
+			if matchesOwnership(filePath, owned) {
+				return false, fmt.Sprintf("File '%s' owned by %s (task %s)", filePath, task.AssignedTo, task.ID)
+			}
+		}
+	}
+	return true, ""
+}
+
+func matchesOwnership(filePath, pattern string) bool {
+	if strings.HasSuffix(pattern, "/**") || strings.HasSuffix(pattern, "/*") {
+		prefix := strings.TrimRight(pattern, "/*")
+		return strings.HasPrefix(filePath, prefix)
+	}
+	return filePath == pattern
+}
+
+// ── Wave Execution ──
+
+// ExecuteWaves runs all waves sequentially, with parallel workers within each wave.
+func (t *Team) ExecuteWaves(ctx context.Context, eventCh chan<- Event) error {
+	t.eventCh = eventCh
+
+	waves, err := t.ComputeWaves()
+	if err != nil {
+		return err
+	}
+
+	t.report(fmt.Sprintf("Team '%s': %d tasks in %d waves", t.config.Name, len(t.tasks), len(waves)))
+
+	for waveIdx, taskIDs := range waves {
+		t.report(fmt.Sprintf("Wave %d/%d: %d tasks (%s)", waveIdx+1, len(waves), len(taskIDs), strings.Join(taskIDs, ", ")))
+
+		if err := t.executeWave(ctx, waveIdx, taskIDs); err != nil {
+			return fmt.Errorf("wave %d failed: %w", waveIdx+1, err)
+		}
+
+		t.report(fmt.Sprintf("Wave %d/%d complete", waveIdx+1, len(waves)))
+	}
+
+	return nil
+}
+
+func (t *Team) executeWave(ctx context.Context, waveIdx int, taskIDs []string) error {
+	waveCtx, cancel := context.WithTimeout(ctx, t.config.CycleTimeout)
+	defer cancel()
+
+	var wg sync.WaitGroup
+
+	for _, taskID := range taskIDs {
+		task := t.getTask(taskID)
+		if task == nil {
+			continue
+		}
+
+		wg.Add(1)
+		go func(tt *TeamTask) {
+			defer wg.Done()
+			t.executeTask(waveCtx, tt)
+		}(task)
+	}
+
+	wg.Wait()
+
+	// Check all tasks in wave completed
+	for _, taskID := range taskIDs {
+		task := t.getTask(taskID)
+		if task != nil && task.Status != "completed" {
+			return fmt.Errorf("task %s did not complete (status: %s)", taskID, task.Status)
+		}
+	}
+
+	return nil
+}
+
+func (t *Team) executeTask(ctx context.Context, task *TeamTask) {
+	t.mu.Lock()
+	task.Status = "running"
+	task.StartedAt = time.Now()
+
+	workerID := fmt.Sprintf("worker-%s", task.ID)
+	workerCtx, workerCancel := context.WithCancel(ctx)
+	t.workers[workerID] = &workerState{
+		ID:        workerID,
+		Name:      task.Name,
+		TaskID:    task.ID,
+		Status:    "running",
+		StartedAt: time.Now(),
+		cancel:    workerCancel,
+	}
+	task.AssignedTo = workerID
+	t.mailbox.EnsureInbox(workerID)
+	t.mu.Unlock()
+
+	log.Printf("[Team] Worker %s starting task %s: %s", workerID, task.ID, task.Name)
+
+	// Build worker prompt with full context
+	prompt := t.buildWorkerPrompt(task)
+
+	// Run worker agent loop
+	userContent, _ := json.Marshal(prompt)
+	messages := []types.Message{
+		{Role: "user", Content: userContent},
+	}
+
+	innerEventCh := make(chan Event, 100)
+	go RunLoop(workerCtx, t.provider, t.model, messages, t.workDir, "auto", innerEventCh)
+
+	// Collect results + check mailbox for shutdown
+	var result string
+	toolCalls := 0
+	for event := range innerEventCh {
+		switch event.Type {
+		case "text":
+			if text, ok := event.Data.(string); ok {
+				result += text
+			}
+		case "tool_result":
+			toolCalls++
+		}
+
+		// Check mailbox for shutdown requests
+		msgs := t.mailbox.Peek(workerID)
+		for _, msg := range msgs {
+			if msg.Type == MsgShutdownRequest {
+				log.Printf("[Team] Worker %s received shutdown request", workerID)
+				workerCancel()
+			}
+		}
+	}
+
+	// Update task status
+	t.mu.Lock()
+	task.Result = result
+	task.ToolCalls = toolCalls
+	task.FinishedAt = time.Now()
+	if workerCtx.Err() != nil {
+		task.Status = "failed"
+	} else {
+		task.Status = "completed"
+	}
+
+	// Notify lead
+	t.workers[workerID].Status = "idle"
+	t.mu.Unlock()
+
+	// Send idle notification
+	t.mailbox.Send(TeamMessage{
+		From: workerID,
+		To:   "lead",
+		Type: MsgIdleNotify,
+		Text: fmt.Sprintf("Task %s %s (%d tool calls, %.1fs)",
+			task.ID, task.Status, toolCalls, task.FinishedAt.Sub(task.StartedAt).Seconds()),
+		Summary: fmt.Sprintf("%s: %s", task.ID, task.Status),
+	})
+
+	t.report(fmt.Sprintf("Worker %s: %s — %s (%d tools, %.1fs)",
+		workerID, task.ID, task.Status, toolCalls, task.FinishedAt.Sub(task.StartedAt).Seconds()))
+}
+
+func (t *Team) buildWorkerPrompt(task *TeamTask) string {
+	filesStr := "all files"
+	if len(task.Files) > 0 {
+		filesStr = strings.Join(task.Files, ", ")
+	}
+
+	return fmt.Sprintf(`You are a Worker agent in team "%s".
+
+## Your Task
+ID: %s
+Name: %s
+Description: %s
+
+## Your Files (EXCLUSIVE — only modify these)
+%s
+
+## Rules
+- ONLY modify files listed above
+- Do NOT touch files owned by other workers
+- Use Read/Grep to understand code before editing
+- Complete the task fully, then stop
+- Be efficient and precise`, t.config.Name, task.ID, task.Name, task.Description, filesStr)
+}
+
+// ── Verification Loop ──
+
+// Verify runs a verification command and returns pass/fail with details.
+func (t *Team) Verify(ctx context.Context) (bool, string) {
+	if t.config.VerifyCommand == "" {
+		return true, "No verification command configured"
+	}
+
+	input, _ := json.Marshal(map[string]string{"command": t.config.VerifyCommand})
+	result := ExecuteBashDeep(input, t.workDir, nil)
+
+	if result.IsError {
+		return false, fmt.Sprintf("Verification FAILED:\n%s", truncateStr(result.Output, 2000))
+	}
+	return true, fmt.Sprintf("Verification PASSED:\n%s", truncateStr(result.Output, 500))
+}
+
+// ── Team Cleanup ──
+
+// Shutdown sends shutdown requests to all workers and cleans up.
+func (t *Team) Shutdown() {
+	t.mu.Lock()
+	workers := make([]string, 0, len(t.workers))
+	for id := range t.workers {
+		workers = append(workers, id)
+	}
+	t.mu.Unlock()
+
+	// Send shutdown to all workers
+	for _, id := range workers {
+		t.mailbox.Send(TeamMessage{
+			From: "lead",
+			To:   id,
+			Type: MsgShutdownRequest,
+			Text: "Team shutdown requested",
+		})
+	}
+
+	// Cancel all worker contexts
+	t.mu.Lock()
+	for _, w := range t.workers {
+		if w.cancel != nil {
+			w.cancel()
+		}
+		w.Status = "shutdown"
+	}
+	t.mu.Unlock()
+
+	// Clean up mailbox
+	t.mailbox.ClearAll()
+
+	log.Printf("[Team] '%s' shutdown complete", t.config.Name)
+}
+
+// ── Queries ──
+
+func (t *Team) getTask(id string) *TeamTask {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	for _, task := range t.tasks {
+		if task.ID == id {
+			return task
+		}
+	}
+	return nil
+}
+
+// GetTasks returns all tasks.
+func (t *Team) GetTasks() []*TeamTask {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	result := make([]*TeamTask, len(t.tasks))
+	copy(result, t.tasks)
+	return result
+}
+
+// GetWorkers returns all worker states.
+func (t *Team) GetWorkers() []workerState {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	result := make([]workerState, 0, len(t.workers))
+	for _, w := range t.workers {
+		result = append(result, *w)
+	}
+	return result
+}
+
+// Summary returns a text summary of team execution.
+func (t *Team) Summary() string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Team: %s\n", t.config.Name))
+
+	completed := 0
+	failed := 0
+	totalTools := 0
+	for _, task := range t.tasks {
+		switch task.Status {
+		case "completed":
+			completed++
+		case "failed":
+			failed++
+		}
+		totalTools += task.ToolCalls
+	}
+
+	sb.WriteString(fmt.Sprintf("Tasks: %d total, %d completed, %d failed\n", len(t.tasks), completed, failed))
+	sb.WriteString(fmt.Sprintf("Tool calls: %d\n", totalTools))
+
+	for _, task := range t.tasks {
+		icon := "⏳"
+		switch task.Status {
+		case "completed":
+			icon = "✅"
+		case "failed":
+			icon = "❌"
+		case "running":
+			icon = "🔄"
+		}
+		sb.WriteString(fmt.Sprintf("  %s [W%d] %s — %s\n", icon, task.Wave, task.ID, task.Name))
+	}
+
+	return sb.String()
+}
+
+func (t *Team) report(msg string) {
+	log.Printf("[Team/%s] %s", t.config.Name, msg)
+	if t.eventCh != nil {
+		t.eventCh <- Event{Type: "status", Data: msg}
+	}
+}
