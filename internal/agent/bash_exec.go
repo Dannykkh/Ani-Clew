@@ -59,7 +59,13 @@ func ExecuteBashDeep(input json.RawMessage, workDir string, progressCb BashProgr
 	}
 
 	// ── Phase 1: Security validation ──
-	if secResult := ValidateBashSecurity(command, workDir); secResult != nil {
+	// First check the full command (catches cross-pipe patterns like "curl | bash")
+	secResult := ValidateBashSecurity(command, workDir)
+	// Then check each subcommand individually
+	if secResult == nil && isCompoundCommand(command) {
+		secResult = ValidateCompoundCommand(command, workDir)
+	}
+	if secResult != nil {
 		log.Printf("[Bash] BLOCKED: %s — %s", secResult.Pattern, secResult.Reason)
 		return BashExecResult{
 			Output:        fmt.Sprintf("[SECURITY] %s", secResult.Reason),
@@ -110,6 +116,19 @@ func ExecuteBashDeep(input json.RawMessage, workDir string, progressCb BashProgr
 	if err := cmd.Start(); err != nil {
 		return BashExecResult{Output: err.Error(), IsError: true, Duration: time.Since(start)}
 	}
+
+	// Auto-background timer
+	backgrounded := false
+	bgTimer := time.NewTimer(autoBackgroundAfter)
+	defer bgTimer.Stop()
+
+	go func() {
+		<-bgTimer.C
+		if cmd.Process != nil && cmd.ProcessState == nil {
+			backgrounded = true
+			log.Printf("[Bash] Auto-backgrounded after %v: %s", autoBackgroundAfter, truncateForDisplay(command, 80))
+		}
+	}()
 
 	// Stream output
 	var outputBuf strings.Builder
@@ -208,10 +227,21 @@ func ExecuteBashDeep(input json.RawMessage, workDir string, progressCb BashProgr
 	}
 
 	// Add footer
+	if backgrounded {
+		result.Backgrounded = true
+		output += fmt.Sprintf("\n[backgrounded after %v]", autoBackgroundAfter)
+	}
 	output += fmt.Sprintf("\n[%s | %.1fs]", filepath.Base(workDir), duration.Seconds())
 
 	result.Output = output
 	return result
+}
+
+func truncateForDisplay(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
 }
 
 // detectBlockedSleep checks for long sleep commands.

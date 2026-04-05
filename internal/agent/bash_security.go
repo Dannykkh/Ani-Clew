@@ -184,6 +184,7 @@ func checkDangerousCommands(cmd, _ string) *SecurityCheckResult {
 		{`>\s*/dev/sd[a-z]`, "Writing to block device detected"},
 		{`(?:^|\s)curl\s.*\|\s*(?:bash|sh|zsh)`, "Pipe from curl to shell detected"},
 		{`(?:^|\s)wget\s.*\|\s*(?:bash|sh|zsh)`, "Pipe from wget to shell detected"},
+		{`\|\s*(?:bash|sh|zsh)\s*$`, "Pipe to shell detected"},
 		{`(?:^|\s)python\s+-c\s+.*(?:import\s+os|subprocess|shutil)`, "Python code execution with OS access"},
 		{`(?:^|\s)node\s+-e\s+.*(?:child_process|exec|spawn)`, "Node code execution with child_process"},
 	}
