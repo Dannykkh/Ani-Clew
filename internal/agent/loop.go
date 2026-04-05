@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aniclew/aniclew/internal/hooks"
 	"github.com/aniclew/aniclew/internal/types"
 )
 
@@ -62,7 +63,19 @@ func RunLoop(
 	copy(messages, userMessages)
 	tools := AllToolDefs(workDir)
 
-	maxIterations := 25 // increased from 20
+	maxIterations := 25
+
+	// ── Hook system: load from project + skill source ──
+	hookRegistry := hooks.NewRegistry()
+	hookRegistry.Load(workDir, "") // "" = all sources
+	hookRegistry.Execute(hooks.HookSessionStart, map[string]string{"WORK_DIR": workDir})
+
+	// ── Permission snapshot (immutable for this session) ──
+	permissions := hooks.CapturePermissions(workDir)
+	_ = permissions // used in tool execution below
+
+	// ── Compaction config ──
+	compactCfg := CompactConfig{ContextWindow: 200000}
 
 	// ── Detect project type ──
 	project := DetectProject(workDir)
@@ -288,15 +301,44 @@ func RunLoop(
 			Content: mustJSON(assistantContent),
 		})
 
+		// ── Auto-compact if approaching context limit ──
+		tokenEstimate := EstimateMessageTokens(messages)
+		if ShouldCompact(compactCfg, tokenEstimate) {
+			eventCh <- Event{Type: "status", Data: "Compacting context..."}
+			compacted, err := CompactMessages(ctx, provider, model, messages)
+			if err != nil {
+				compactCfg.CompactFailures++
+				log.Printf("[Compact] Failed (%d/%d): %v", compactCfg.CompactFailures, maxCompactFailures, err)
+			} else {
+				messages = compacted
+				compactCfg.CompactFailures = 0
+			}
+		}
+
 		// ── Execute tools and collect results ──
 		var toolResults []map[string]interface{}
 		for _, tu := range toolUses {
 			log.Printf("[Agent] Executing: %s", tu.Name)
 
-			// ── Permission check ──
+			// ── Pre-tool hook ──
+			hookRegistry.Execute(hooks.HookPreToolUse, map[string]string{
+				"TOOL_NAME": tu.Name, "WORK_DIR": workDir,
+			})
+
+			// ── Permission check (snapshot + legacy) ──
+			permDecision := permissions.Decide(tu.Name, string(tu.InputRaw))
+
 			permCfg := DefaultPermissionConfig()
-			permCfg.AutoApprove = "moderate" // allow safe + moderate by default
+			permCfg.AutoApprove = "moderate"
 			allowed, permReason, dangerLevel := CheckPermission(tu.Name, tu.Input, workDir, permCfg)
+
+			// Snapshot decision overrides if explicit
+			if permDecision == "deny" {
+				allowed = false
+				permReason = "Denied by permission rule"
+			} else if permDecision == "allow" {
+				allowed = true
+			}
 
 			// Show tool input to client
 			var inputPreview interface{}
@@ -320,6 +362,13 @@ func RunLoop(
 
 			result, isError := ExecuteTool(tu.Name, tu.Input, workDir)
 
+			// ── Post-tool hook ──
+			hookRegistry.Execute(hooks.HookPostToolUse, map[string]string{
+				"TOOL_NAME": tu.Name, "WORK_DIR": workDir,
+				"TOOL_RESULT": truncateStr(result, 500),
+				"TOOL_ERROR": fmt.Sprintf("%v", isError),
+			})
+
 			// Send result to client
 			eventCh <- Event{Type: "tool_result", Data: map[string]interface{}{
 				"id": tu.ID, "name": tu.Name, "result": truncateStr(result, 2000), "isError": isError,
@@ -342,6 +391,7 @@ func RunLoop(
 		eventCh <- Event{Type: "status", Data: fmt.Sprintf("Iteration %d/%d — %d tools executed", i+1, maxIterations, len(toolUses))}
 	}
 
+	hookRegistry.Execute(hooks.HookSessionEnd, map[string]string{"WORK_DIR": workDir})
 	eventCh <- Event{Type: "error", Data: "Max iterations reached"}
 }
 

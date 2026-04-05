@@ -19,6 +19,7 @@ import (
 	"github.com/aniclew/aniclew/internal/agent"
 	"github.com/aniclew/aniclew/internal/config"
 	"github.com/aniclew/aniclew/internal/gateway"
+	"github.com/aniclew/aniclew/internal/hooks"
 	"github.com/aniclew/aniclew/internal/kairos"
 	"github.com/aniclew/aniclew/internal/observability"
 	"github.com/aniclew/aniclew/internal/providers"
@@ -178,6 +179,10 @@ func (s *Server) Start() error {
 	mux.HandleFunc("PUT /api/routes", s.handleSetRoute)
 	mux.HandleFunc("GET /api/costs", s.handleGetCosts)
 	// KAIROS daemon
+	// Hooks & Permissions
+	mux.HandleFunc("GET /api/hooks", s.handleListHooks)
+	mux.HandleFunc("GET /api/permissions", s.handlePermissions)
+
 	// Observability
 	mux.HandleFunc("GET /api/traces", s.handleTraces)
 	mux.HandleFunc("GET /api/metrics", s.handleMetrics)
@@ -1141,6 +1146,25 @@ func (d *Server) handleKairosWebhook(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(r.Body).Decode(&body)
 	daemon.Notifier().SetWebhook(body.URL)
 	writeJSON(w, map[string]any{"ok": true, "webhook": body.URL})
+}
+
+func (s *Server) handleListHooks(w http.ResponseWriter, _ *http.Request) {
+	s.mu.RLock()
+	workDir := s.workDir
+	s.mu.RUnlock()
+
+	registry := hooks.NewRegistry()
+	registry.Load(workDir, "")
+	writeJSON(w, registry.GetHooks())
+}
+
+func (s *Server) handlePermissions(w http.ResponseWriter, _ *http.Request) {
+	s.mu.RLock()
+	workDir := s.workDir
+	s.mu.RUnlock()
+
+	snap := hooks.CapturePermissions(workDir)
+	writeJSON(w, snap)
 }
 
 func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
