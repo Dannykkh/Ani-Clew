@@ -273,6 +273,12 @@ func (t *Team) executeTask(ctx context.Context, task *TeamTask) {
 
 	log.Printf("[Team] Worker %s starting task %s: %s", workerID, task.ID, task.Name)
 
+	// Set file ownership checker for this worker
+	FileOwnershipChecker = func(wID, filePath string) (bool, string) {
+		return t.CheckFileOwnership(wID, filePath)
+	}
+	activeWorkerID = workerID
+
 	// Build worker prompt with full context
 	prompt := t.buildWorkerPrompt(task)
 

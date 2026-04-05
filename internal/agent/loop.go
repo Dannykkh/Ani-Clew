@@ -145,35 +145,41 @@ func RunLoop(
 	}
 
 	for i := 0; i < maxIterations; i++ {
-		// ── Context compression: estimate tokens and compress if needed ──
-		totalChars := len(projectCtx) + len(skillText)
-		for _, m := range messages {
-			totalChars += len(m.Content)
-		}
-		estimatedTokens := totalChars / 4
+		// ── Context compression ──
+		tokenEstimate := EstimateMessageTokens(messages)
+		if ShouldCompact(compactCfg, tokenEstimate) && len(messages) >= minMessagesForCompact {
+			eventCh <- Event{Type: "status", Data: fmt.Sprintf("Compacting context (~%dk tokens, %d messages)...", tokenEstimate/1000, len(messages))}
 
-		if estimatedTokens > 80000 && len(messages) > 6 {
-			eventCh <- Event{Type: "status", Data: fmt.Sprintf("Context large (~%dk tokens), compressing...", estimatedTokens/1000)}
-			// Keep first 2 messages (system context) and last 4 messages, summarize the middle
-			if len(messages) > 8 {
-				middle := make([]map[string]string, 0)
-				for _, m := range messages[2 : len(messages)-4] {
-					var text string
-					json.Unmarshal(m.Content, &text)
-					middle = append(middle, map[string]string{"role": m.Role, "content": text})
+			// Try LLM-based compaction first
+			compacted, err := CompactMessages(ctx, provider, model, messages)
+			if err != nil {
+				compactCfg.CompactFailures++
+				log.Printf("[Compact] LLM compact failed (%d/%d): %v — falling back to snip", compactCfg.CompactFailures, maxCompactFailures, err)
+
+				// Snip fallback: keep first 2 + last 4, summarize middle inline
+				if len(messages) > 8 {
+					var middleSummary string
+					for _, m := range messages[2 : len(messages)-4] {
+						var text string
+						json.Unmarshal(m.Content, &text)
+						if len(text) > 100 {
+							text = text[:100] + "..."
+						}
+						if text != "" {
+							middleSummary += fmt.Sprintf("[%s] %s\n", m.Role, text)
+						}
+					}
+					snipped := make([]types.Message, 0)
+					snipped = append(snipped, messages[:2]...)
+					snipped = append(snipped, types.Message{Role: "user", Content: mustJSON("[Context Summary]\n" + middleSummary)})
+					snipped = append(snipped, messages[len(messages)-4:]...)
+					messages = snipped
 				}
-				summary := CompressContext(middle)
-				summaryMsg := types.Message{
-					Role:    "user",
-					Content: mustJSON("[Context Summary]\n" + summary),
-				}
-				compressed := make([]types.Message, 0)
-				compressed = append(compressed, messages[:2]...)
-				compressed = append(compressed, summaryMsg)
-				compressed = append(compressed, messages[len(messages)-4:]...)
-				messages = compressed
-				eventCh <- Event{Type: "status", Data: fmt.Sprintf("Compressed to %d messages", len(messages))}
+			} else {
+				messages = compacted
+				compactCfg.CompactFailures = 0
 			}
+			eventCh <- Event{Type: "status", Data: fmt.Sprintf("Compacted to %d messages", len(messages))}
 		}
 
 		// Build request with full context
@@ -187,7 +193,7 @@ func RunLoop(
 		}
 
 		// Call LLM (with retry)
-		eventCh <- Event{Type: "status", Data: fmt.Sprintf("Thinking... (iteration %d/%d, ~%dk tokens)", i+1, maxIterations, estimatedTokens/1000)}
+		eventCh <- Event{Type: "status", Data: fmt.Sprintf("Thinking... (iteration %d/%d, ~%dk tokens)", i+1, maxIterations, tokenEstimate/1000)}
 
 		var ch <-chan types.SSEEvent
 		var err error
@@ -278,7 +284,7 @@ func RunLoop(
 		if len(toolUses) == 0 {
 			eventCh <- Event{Type: "done", Data: map[string]interface{}{
 				"iterations":     i + 1,
-				"estimatedTokens": estimatedTokens,
+				"tokenEstimate": tokenEstimate,
 				"project":        project.Type,
 			}}
 			return
@@ -300,20 +306,6 @@ func RunLoop(
 			Role:    "assistant",
 			Content: mustJSON(assistantContent),
 		})
-
-		// ── Auto-compact if approaching context limit ──
-		tokenEstimate := EstimateMessageTokens(messages)
-		if ShouldCompact(compactCfg, tokenEstimate) {
-			eventCh <- Event{Type: "status", Data: "Compacting context..."}
-			compacted, err := CompactMessages(ctx, provider, model, messages)
-			if err != nil {
-				compactCfg.CompactFailures++
-				log.Printf("[Compact] Failed (%d/%d): %v", compactCfg.CompactFailures, maxCompactFailures, err)
-			} else {
-				messages = compacted
-				compactCfg.CompactFailures = 0
-			}
-		}
 
 		// ── Partition tools into concurrent-safe vs serial ──
 		var concurrentTools, serialTools []toolUseBlock
@@ -394,6 +386,10 @@ func RunLoop(
 				permReason = "Denied by permission rule"
 			} else if permDecision == "allow" {
 				allowed = true
+			} else if permDecision == "ask" && allowed {
+				// Tool was allowed by legacy check but snapshot says "ask"
+				// Persist this as an allow rule for future sessions
+				hooks.PersistAllowRule(workDir, tu.Name, "")
 			}
 
 			// Show tool input to client

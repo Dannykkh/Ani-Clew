@@ -115,8 +115,30 @@ func AllToolDefs(workDir string) []types.ToolDef {
 	return all
 }
 
+// FileOwnershipChecker is set by Team to enforce file ownership at execution time.
+// Returns (allowed, reason). If nil, all writes are allowed.
+var FileOwnershipChecker func(workerID, filePath string) (bool, string)
+
+// activeWorkerID is set per-goroutine to identify the current worker.
+var activeWorkerID string
+
 // ExecuteTool runs a tool and returns the result text.
 func ExecuteTool(name string, input json.RawMessage, workDir string) (string, bool) {
+	// ── File ownership enforcement for write tools ──
+	if FileOwnershipChecker != nil && activeWorkerID != "" {
+		if name == "Write" || name == "Edit" {
+			var args struct {
+				FilePath string `json:"file_path"`
+			}
+			json.Unmarshal(input, &args)
+			if args.FilePath != "" {
+				allowed, reason := FileOwnershipChecker(activeWorkerID, args.FilePath)
+				if !allowed {
+					return fmt.Sprintf("[OWNERSHIP BLOCKED] %s", reason), true
+				}
+			}
+		}
+	}
 	// Try extended tools first
 	if result, isErr, handled := ExecuteExtendedTool(name, input, workDir); handled {
 		return result, isErr

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"embed"
 	"encoding/base64"
 	"encoding/json"
@@ -473,9 +474,12 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	inputTokens := 0
 	flusher, hasFlusher := w.(http.Flusher)
 
+	_, streamCancel := context.WithCancel(r.Context())
+	defer streamCancel()
+
 	watchdog := apiPkg.NewStreamWatchdog(func() {
-		// Timeout: close the connection
-		log.Printf("[Stream] Idle timeout for %s/%s", provider.Name(), model)
+		log.Printf("[Stream] Idle timeout for %s/%s — aborting", provider.Name(), model)
+		streamCancel() // Actually abort the stream
 	})
 	defer watchdog.Stop()
 
@@ -1154,12 +1158,6 @@ func (d *Server) handleKairosNotifications(w http.ResponseWriter, _ *http.Reques
 }
 
 func (d *Server) handleKairosSSE(w http.ResponseWriter, r *http.Request) {
-	daemon := d.GetDaemon()
-	if daemon == nil || daemon.Notifier() == nil {
-		writeError(w, 400, "Daemon not initialized")
-		return
-	}
-
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -1170,8 +1168,27 @@ func (d *Server) handleKairosSSE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ch := daemon.Notifier().Subscribe()
-	defer daemon.Notifier().Unsubscribe(ch)
+	// Send keepalive immediately so client knows connection works
+	fmt.Fprintf(w, ": keepalive\n\n")
+	flusher.Flush()
+
+	// Wait for daemon to exist (poll every 2s)
+	var ch chan kairos.Notification
+	for {
+		daemon := d.GetDaemon()
+		if daemon != nil && daemon.Notifier() != nil {
+			ch = daemon.Notifier().Subscribe()
+			defer daemon.Notifier().Unsubscribe(ch)
+			break
+		}
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(2 * time.Second):
+			fmt.Fprintf(w, ": waiting for daemon\n\n")
+			flusher.Flush()
+		}
+	}
 
 	for {
 		select {

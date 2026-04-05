@@ -11,12 +11,14 @@ import (
 )
 
 const (
-	// Reserve 20K tokens for output
+	// Reserve tokens for output
 	maxOutputReserve = 20000
 	// Auto-compact when this close to limit
 	compactMargin = 13000
 	// Circuit breaker: stop after N consecutive failures
 	maxCompactFailures = 3
+	// Minimum messages before compaction makes sense
+	minMessagesForCompact = 8
 )
 
 // CompactConfig holds compaction settings.
