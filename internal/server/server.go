@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/aniclew/aniclew/internal/agent"
+	apiPkg "github.com/aniclew/aniclew/internal/api"
 	"github.com/aniclew/aniclew/internal/config"
 	"github.com/aniclew/aniclew/internal/gateway"
 	"github.com/aniclew/aniclew/internal/hooks"
@@ -440,19 +441,44 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(200)
 
+	// Stream with watchdog
 	outputTokens := 0
+	inputTokens := 0
+	flusher, hasFlusher := w.(http.Flusher)
+
+	watchdog := apiPkg.NewStreamWatchdog(func() {
+		// Timeout: close the connection
+		log.Printf("[Stream] Idle timeout for %s/%s", provider.Name(), model)
+	})
+	defer watchdog.Stop()
+
 	for event := range ch {
+		watchdog.Ping()
 		if err := stream.WriteSSEEvent(w, event); err != nil {
 			break
 		}
+		if hasFlusher {
+			flusher.Flush()
+		}
 		// Track tokens
 		if event.Usage != nil {
-			outputTokens = event.Usage.OutputTokens
+			if event.Usage.OutputTokens > 0 {
+				outputTokens = event.Usage.OutputTokens
+			}
+			if event.Usage.InputTokens > 0 {
+				inputTokens = event.Usage.InputTokens
+			}
 		}
 		if event.Type == "message_stop" {
 			break
 		}
 	}
+
+	// Calculate accurate cost
+	cost := apiPkg.CalculateCost(model, apiPkg.TokenUsage{
+		InputTokens:  inputTokens,
+		OutputTokens: outputTokens,
+	})
 
 	// Record cost
 	if rt != nil {
@@ -472,7 +498,6 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	s.mu.RUnlock()
 	if tracker != nil {
 		latency := time.Since(startTime).Milliseconds()
-		cost := float64(outputTokens) / 1_000_000 * 5
 		tracker.Record(observability.RequestTrace{
 			ID:           fmt.Sprintf("req_%d", startTime.UnixNano()),
 			Timestamp:    startTime,
