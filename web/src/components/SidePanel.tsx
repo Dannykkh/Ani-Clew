@@ -1,14 +1,60 @@
 import { useState, useEffect } from 'react';
-import { fetchJSON } from '../lib/api';
+import { fetchJSON, postJSON } from '../lib/api';
 import { getLang } from '../lib/i18n';
 import { listSessions, type SessionSummary } from '../lib/sessions';
 
 interface ProjectInfo {
-  type: string;
+  path: string;
   name: string;
+  type: string;
   framework: string;
   fileCount: number;
-  fileTree: string;
+  active: boolean;
+}
+
+function FileTreeNode({ node, depth, onFileClick }: { node: TreeNode; depth: number; onFileClick?: (path: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const indent = depth * 12;
+
+  if (node.isDir) {
+    return (
+      <div>
+        <button
+          onClick={() => setOpen(!open)}
+          className="w-full text-left flex items-center gap-1 px-2 py-0.5 text-xs hover:bg-[var(--color-surface2)] transition-colors"
+          style={{ paddingLeft: `${indent + 8}px` }}
+        >
+          <span className="text-[9px] w-3">{open ? '▾' : '▸'}</span>
+          <span className="truncate">{node.name}</span>
+        </button>
+        {open && node.children?.map(child => (
+          <FileTreeNode key={child.path} node={child} depth={depth + 1} onFileClick={onFileClick} />
+        ))}
+      </div>
+    );
+  }
+
+  const ext = node.name.split('.').pop() || '';
+  const extColors: Record<string, string> = {
+    go: 'text-blue-400', ts: 'text-blue-300', tsx: 'text-blue-300',
+    js: 'text-yellow-300', json: 'text-yellow-200', md: 'text-gray-400',
+    py: 'text-green-300', rs: 'text-orange-300', css: 'text-pink-300',
+  };
+
+  return (
+    <button
+      onClick={() => onFileClick?.(node.path)}
+      className="w-full text-left flex items-center gap-1 px-2 py-0.5 text-xs hover:bg-[var(--color-surface2)] transition-colors"
+      style={{ paddingLeft: `${indent + 20}px` }}
+    >
+      <span className={`truncate ${extColors[ext] || ''}`}>{node.name}</span>
+      {node.size !== undefined && node.size > 0 && (
+        <span className="text-[9px] text-[var(--color-text2)] ml-auto shrink-0">
+          {node.size > 1024 ? `${(node.size / 1024).toFixed(0)}K` : `${node.size}B`}
+        </span>
+      )}
+    </button>
+  );
 }
 
 interface Props {
@@ -17,24 +63,83 @@ interface Props {
   onFileClick?: (path: string) => void;
   onSessionClick?: (id: string) => void;
   onNewChat?: () => void;
+  onProjectSwitch?: (path: string) => void;
 }
 
-export function SidePanel({ visible, mode, onFileClick, onSessionClick, onNewChat }: Props) {
-  const [project, setProject] = useState<ProjectInfo | null>(null);
-  const [workspace, setWorkspace] = useState('');
+interface TreeNode {
+  name: string;
+  path: string;
+  isDir: boolean;
+  size?: number;
+  children?: TreeNode[];
+}
+
+export function SidePanel({ visible, mode, onFileClick, onSessionClick, onNewChat, onProjectSwitch }: Props) {
+  const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [showProjectList, setShowProjectList] = useState(false);
+  const [showAddProject, setShowAddProject] = useState(false);
   const [browseEntries, setBrowseEntries] = useState<any[]>([]);
   const [browsePath, setBrowsePath] = useState('');
+  const [fileTree, setFileTree] = useState<TreeNode[]>([]);
   const ko = getLang() === 'ko';
 
+  const activeProject = projects.find(p => p.active);
+
+  // Load projects + file tree
   useEffect(() => {
-    fetchJSON<any>('/api/workspace').then((data) => {
-      setWorkspace(data.path);
-      setProject(data.project);
-      loadBrowse(data.path);
-    }).catch(() => {});
-    listSessions().then(setSessions).catch(() => {});
+    loadProjects();
+    loadSessions();
+    loadFileTree();
   }, []);
+
+  async function loadSessions() {
+    const ws = (await fetchJSON<any>('/api/workspace').catch(() => null))?.path;
+    listSessions(ws || undefined).then(setSessions).catch(() => {});
+  }
+
+  async function loadFileTree() {
+    try {
+      const data = await fetchJSON<TreeNode[]>('/api/tree');
+      setFileTree(data || []);
+    } catch { setFileTree([]); }
+  }
+
+  async function loadProjects() {
+    try {
+      const data = await fetchJSON<ProjectInfo[]>('/api/projects');
+      setProjects(data);
+    } catch { setProjects([]); }
+  }
+
+  async function switchProject(path: string) {
+    await fetchJSON('/api/workspace', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    });
+    await loadProjects();
+    loadSessions();
+    loadFileTree();
+    setShowProjectList(false);
+    onProjectSwitch?.(path);
+  }
+
+  async function addProject(path: string) {
+    await postJSON('/api/projects', { path });
+    await loadProjects();
+    loadSessions();
+    loadFileTree();
+    setShowAddProject(false);
+    setShowProjectList(false);
+    onProjectSwitch?.(path);
+  }
+
+  async function removeProject(path: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    await fetchJSON(`/api/projects?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+    await loadProjects();
+  }
 
   async function loadBrowse(path: string) {
     try {
@@ -44,16 +149,11 @@ export function SidePanel({ visible, mode, onFileClick, onSessionClick, onNewCha
     } catch {}
   }
 
-  async function selectWorkspace(path: string) {
-    await fetchJSON('/api/workspace', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path }),
-    });
-    setWorkspace(path);
-    const projData = await fetchJSON<any>('/api/workspace');
-    setProject(projData.project);
-    loadBrowse(path);
+  function openFolderBrowser() {
+    setShowAddProject(true);
+    // Start browsing from common locations
+    const startPath = browsePath || 'D:/git';
+    loadBrowse(startPath);
   }
 
   if (!visible) return null;
@@ -63,65 +163,136 @@ export function SidePanel({ visible, mode, onFileClick, onSessionClick, onNewCha
   };
 
   return (
-    <div className="w-64 bg-[var(--color-surface)] border-r border-[var(--color-border)] flex flex-col h-screen overflow-hidden shrink-0">
-      {/* Project Header */}
-      <div className="p-3 border-b border-[var(--color-border)]">
-        <div className="flex items-center gap-2">
-          <span>{project ? (projectTypes[project.type] || '▸') : '▸'}</span>
-          <div className="min-w-0">
-            <div className="text-xs font-semibold truncate">{project?.name || 'No project'}</div>
-            <div className="text-[10px] text-[var(--color-text2)] truncate">{workspace}</div>
+    <div className="w-64 bg-[var(--color-surface)] border-r border-[var(--color-border)] flex flex-col h-[calc(100vh-24px)] overflow-hidden shrink-0">
+      {/* Project Header — clickable dropdown */}
+      <div className="border-b border-[var(--color-border)]">
+        <button
+          onClick={() => { setShowProjectList(!showProjectList); setShowAddProject(false); }}
+          className="w-full p-3 text-left hover:bg-[var(--color-surface2)] transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <span>{activeProject ? (projectTypes[activeProject.type] || '▸') : '▸'}</span>
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-semibold truncate">{activeProject?.name || (ko ? '프로젝트 선택' : 'Select Project')}</div>
+              <div className="text-[10px] text-[var(--color-text2)] truncate">{activeProject?.path || ''}</div>
+            </div>
+            <span className="text-[10px] text-[var(--color-text2)]">{showProjectList ? '▴' : '▾'}</span>
           </div>
-        </div>
-        {project && (
-          <div className="flex gap-1 mt-1.5">
-            <span className="text-[9px] bg-[var(--color-accent)]/20 text-[var(--color-accent)] px-1 py-0.5 rounded">{project.type}</span>
-            {project.framework && <span className="text-[9px] bg-[var(--color-green)]/20 text-[var(--color-green)] px-1 py-0.5 rounded">{project.framework}</span>}
-            <span className="text-[9px] text-[var(--color-text2)]">{project.fileCount} files</span>
+          {activeProject && (
+            <div className="flex gap-1 mt-1.5">
+              <span className="text-[9px] bg-[var(--color-accent)]/20 text-[var(--color-accent)] px-1 py-0.5 rounded">{activeProject.type}</span>
+              {activeProject.framework && <span className="text-[9px] bg-[var(--color-green)]/20 text-[var(--color-green)] px-1 py-0.5 rounded">{activeProject.framework}</span>}
+              <span className="text-[9px] text-[var(--color-text2)]">{activeProject.fileCount} files</span>
+            </div>
+          )}
+        </button>
+
+        {/* Project Dropdown */}
+        {showProjectList && !showAddProject && (
+          <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] max-h-60 overflow-y-auto">
+            {projects.map(p => (
+              <div
+                key={p.path}
+                onClick={() => switchProject(p.path)}
+                className={`flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-[var(--color-surface2)] transition-colors ${p.active ? 'bg-[var(--color-accent)]/10' : ''}`}
+              >
+                <span className="text-[10px]">{projectTypes[p.type] || '▸'}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-medium truncate">{p.name}</div>
+                  <div className="text-[9px] text-[var(--color-text2)] truncate">{p.path}</div>
+                </div>
+                {p.active && <span className="text-[9px] text-[var(--color-accent)]">●</span>}
+                <button
+                  onClick={(e) => removeProject(p.path, e)}
+                  className="text-[10px] text-[var(--color-text2)] hover:text-[var(--color-red)] px-1"
+                  title={ko ? '제거' : 'Remove'}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+            <button
+              onClick={openFolderBrowser}
+              className="w-full px-3 py-2 text-xs text-[var(--color-accent)] hover:bg-[var(--color-surface2)] transition-colors text-left flex items-center gap-1.5"
+            >
+              <span>+</span> {ko ? '프로젝트 추가' : 'Add Project'}
+            </button>
+          </div>
+        )}
+
+        {/* Folder Browser for Adding Project */}
+        {showAddProject && (
+          <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] max-h-80 overflow-y-auto">
+            <div className="px-2 py-1.5 text-[10px] text-[var(--color-text2)] flex items-center justify-between border-b border-[var(--color-border)]">
+              <button
+                onClick={() => setShowAddProject(false)}
+                className="text-[10px] hover:text-[var(--color-text)]"
+              >
+                ← {ko ? '뒤로' : 'Back'}
+              </button>
+              <span className="truncate ml-2">{browsePath}</span>
+            </div>
+            <div className="px-2 py-1 flex gap-1">
+              <button
+                onClick={() => {
+                  const parent = browsePath.replace(/[/\\][^/\\]+$/, '');
+                  loadBrowse(parent);
+                }}
+                className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-surface2)] hover:bg-[var(--color-border)] transition-colors"
+              >
+                ↑ {ko ? '상위' : 'Up'}
+              </button>
+              <button
+                onClick={() => addProject(browsePath)}
+                className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-accent)] text-white hover:opacity-80 transition-colors ml-auto"
+              >
+                {ko ? '이 폴더 추가' : 'Add This Folder'}
+              </button>
+            </div>
+            <div className="py-1">
+              {browseEntries.filter((e: any) => e.isDir).map((entry: any) => (
+                <div
+                  key={entry.name}
+                  onClick={() => loadBrowse(browsePath.replace(/\\/g, '/') + '/' + entry.name)}
+                  className="flex items-center gap-1.5 px-3 py-1 text-xs cursor-pointer hover:bg-[var(--color-surface2)] transition-colors"
+                >
+                  <span className="text-[10px]">▸</span>
+                  <span className={`truncate ${entry.isProject ? 'text-[var(--color-accent)]' : ''}`}>{entry.name}</span>
+                  {entry.isProject && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); addProject(browsePath.replace(/\\/g, '/') + '/' + entry.name); }}
+                      className="ml-auto text-[9px] bg-[var(--color-accent)] text-white px-1.5 py-0.5 rounded hover:opacity-80 shrink-0"
+                    >
+                      + {ko ? '추가' : 'Add'}
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>
 
       {mode === 'files' ? (
-        /* ── File Tree ── */
+        /* File Tree */
         <div className="flex-1 overflow-y-auto">
-          {/* Browse path */}
-          <div className="px-2 py-1.5 text-[10px] text-[var(--color-text2)] uppercase border-b border-[var(--color-border)] flex items-center justify-between">
+          <div className="px-2 py-1.5 text-[10px] text-[var(--color-text2)] uppercase border-b border-[var(--color-border)]">
             <span>{ko ? '파일' : 'Files'}</span>
-            <button onClick={() => {
-              const parent = browsePath.replace(/[/\\][^/\\]+$/, '');
-              loadBrowse(parent);
-            }} className="text-[10px] hover:text-[var(--color-text)]">↑</button>
           </div>
           <div className="py-1">
-            {browseEntries.map((entry: any) => (
-              <div
-                key={entry.name}
-                onClick={() => {
-                  if (entry.isDir) {
-                    loadBrowse(browsePath.replace(/\\/g, '/') + '/' + entry.name);
-                  } else {
-                    onFileClick?.(entry.name);
-                  }
-                }}
-                className="flex items-center gap-1.5 px-3 py-1 text-xs cursor-pointer hover:bg-[var(--color-surface2)] transition-colors"
-              >
-                <span className="text-[10px]">{entry.isDir ? '▸' : '·'}</span>
-                <span className={`truncate ${entry.isProject ? 'text-[var(--color-accent)]' : ''}`}>{entry.name}</span>
-                {entry.isProject && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); selectWorkspace(browsePath.replace(/\\/g, '/') + '/' + entry.name); }}
-                    className="ml-auto text-[9px] text-[var(--color-accent)] hover:underline shrink-0"
-                  >
-                    {ko ? '선택' : 'Set'}
-                  </button>
-                )}
+            {fileTree.length === 0 ? (
+              <div className="px-3 py-4 text-xs text-[var(--color-text2)] text-center">
+                {ko ? '프로젝트를 선택하세요' : 'Select a project'}
               </div>
-            ))}
+            ) : (
+              fileTree.map(node => (
+                <FileTreeNode key={node.path} node={node} depth={0} onFileClick={onFileClick} />
+              ))
+            )}
           </div>
         </div>
       ) : (
-        /* ── Session History ── */
+        /* Session History */
         <div className="flex-1 overflow-y-auto">
           <div className="px-2 py-1.5 text-[10px] text-[var(--color-text2)] uppercase border-b border-[var(--color-border)] flex items-center justify-between">
             <span>{ko ? '대화 기록' : 'History'}</span>

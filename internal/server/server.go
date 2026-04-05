@@ -111,8 +111,18 @@ func (s *Server) SetSessionStore(ss *agent.SessionStore) {
 
 func (s *Server) SetWorkDir(dir string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.workDir = dir
+	mem := s.memory
+	daemon := s.daemon
+	s.mu.Unlock()
+
+	// Switch KAIROS subsystems to the new project
+	if mem != nil {
+		mem.SwitchProject(dir)
+	}
+	if daemon != nil {
+		daemon.SwitchProject(dir)
+	}
 }
 
 func (s *Server) Start() error {
@@ -136,6 +146,11 @@ func (s *Server) Start() error {
 	mux.HandleFunc("POST /api/providers/register", s.handleRegisterProvider)
 	mux.HandleFunc("GET /api/config", s.handleGetConfig)
 
+	// Projects
+	mux.HandleFunc("GET /api/projects", s.handleListProjects)
+	mux.HandleFunc("POST /api/projects", s.handleAddProject)
+	mux.HandleFunc("DELETE /api/projects", s.handleDeleteProject)
+
 	// Workspace / folder browsing
 	mux.HandleFunc("GET /api/browse", s.handleBrowseFolder)
 	mux.HandleFunc("PUT /api/workspace", s.handleSetWorkspace)
@@ -155,6 +170,10 @@ func (s *Server) Start() error {
 	mux.HandleFunc("DELETE /api/kairos/tasks", s.handleKairosRemoveTask)
 	mux.HandleFunc("GET /api/kairos/logs", s.handleKairosLogs)
 	mux.HandleFunc("PUT /api/kairos/autonomy", s.handleKairosAutonomy)
+	mux.HandleFunc("GET /api/kairos/git", s.handleKairosGitStatus)
+	mux.HandleFunc("GET /api/kairos/notifications", s.handleKairosNotifications)
+	mux.HandleFunc("GET /api/kairos/notifications/stream", s.handleKairosSSE)
+	mux.HandleFunc("PUT /api/kairos/webhook", s.handleKairosWebhook)
 
 	// Memory (AutoDream)
 	mux.HandleFunc("GET /api/memory", s.handleMemoryState)
@@ -213,10 +232,60 @@ func (s *Server) Start() error {
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /", s.handleRoot)
 
-	handler := corsMiddleware(mux)
+	handler := corsMiddleware(authMiddleware(mux))
 	addr := fmt.Sprintf(":%d", s.port)
 	log.Printf("Server listening on http://localhost:%d", s.port)
 	return http.ListenAndServe(addr, handler)
+}
+
+func authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cfg := config.Load()
+		token := cfg.AccessToken
+		if token == "" {
+			// No token configured — allow all
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Skip auth for static assets and health check
+		path := r.URL.Path
+		if path == "/app" || strings.HasPrefix(path, "/assets/") || path == "/favicon.svg" || path == "/icons.svg" || path == "/health" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Check token: query param, header, or cookie
+		provided := r.URL.Query().Get("token")
+		if provided == "" {
+			provided = r.Header.Get("X-Access-Token")
+		}
+		if provided == "" {
+			if c, err := r.Cookie("aniclew-token"); err == nil {
+				provided = c.Value
+			}
+		}
+		// Also accept via Authorization: Bearer
+		if provided == "" {
+			auth := r.Header.Get("Authorization")
+			if strings.HasPrefix(auth, "Bearer ") {
+				// Don't intercept LLM API keys — only check if it matches our token
+				candidate := strings.TrimPrefix(auth, "Bearer ")
+				if candidate == token {
+					provided = candidate
+				}
+			}
+		}
+
+		if provided != token {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(401)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Unauthorized. Set token via ?token= or X-Access-Token header."})
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -869,11 +938,28 @@ func (d *Server) handleKairosStart(w http.ResponseWriter, _ *http.Request) {
 	if daemon == nil {
 		cfg := kairos.DefaultDaemonConfig()
 		daemon = kairos.NewDaemon(cfg)
+		home, _ := os.UserHomeDir()
+		daemon.SetBaseDir(filepath.Join(home, ".claude-proxy"))
 		d.SetDaemon(daemon)
 	}
+	// Sync daemon with current workspace
+	d.mu.RLock()
+	workDir := d.workDir
+	d.mu.RUnlock()
+	daemon.SwitchProject(workDir)
 	d.mu.RLock()
 	daemon.SetProvider(d.activeProvider, d.activeModel)
 	d.mu.RUnlock()
+
+	// Auto-add git-watch if not present
+	hasGitWatch := false
+	for _, t := range daemon.GetTasks() {
+		if t.Type == "git-watch" { hasGitWatch = true; break }
+	}
+	if !hasGitWatch {
+		daemon.AddTask(kairos.AutoGitWatchTask())
+	}
+
 	daemon.Start()
 	writeJSON(w, map[string]any{"ok": true, "state": "running"})
 }
@@ -943,6 +1029,75 @@ func (d *Server) handleKairosAutonomy(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(r.Body).Decode(&body)
 	daemon.SetAutonomy(body.Mode)
 	writeJSON(w, map[string]any{"ok": true, "autonomy": body.Mode})
+}
+
+func (d *Server) handleKairosNotifications(w http.ResponseWriter, _ *http.Request) {
+	daemon := d.GetDaemon()
+	if daemon == nil || daemon.Notifier() == nil {
+		writeJSON(w, []any{})
+		return
+	}
+	writeJSON(w, daemon.Notifier().Recent(20))
+}
+
+func (d *Server) handleKairosSSE(w http.ResponseWriter, r *http.Request) {
+	daemon := d.GetDaemon()
+	if daemon == nil || daemon.Notifier() == nil {
+		writeError(w, 400, "Daemon not initialized")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, 500, "Streaming not supported")
+		return
+	}
+
+	ch := daemon.Notifier().Subscribe()
+	defer daemon.Notifier().Unsubscribe(ch)
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case notif, ok := <-ch:
+			if !ok {
+				return
+			}
+			data, _ := json.Marshal(notif)
+			fmt.Fprintf(w, "data: %s\n\n", data)
+			flusher.Flush()
+		}
+	}
+}
+
+func (d *Server) handleKairosWebhook(w http.ResponseWriter, r *http.Request) {
+	daemon := d.GetDaemon()
+	if daemon == nil || daemon.Notifier() == nil {
+		writeError(w, 400, "Daemon not initialized")
+		return
+	}
+	var body struct{ URL string `json:"url"` }
+	json.NewDecoder(r.Body).Decode(&body)
+	daemon.Notifier().SetWebhook(body.URL)
+	writeJSON(w, map[string]any{"ok": true, "webhook": body.URL})
+}
+
+func (d *Server) handleKairosGitStatus(w http.ResponseWriter, _ *http.Request) {
+	d.mu.RLock()
+	workDir := d.workDir
+	d.mu.RUnlock()
+
+	status, err := kairos.CheckGitStatus(workDir)
+	if err != nil {
+		writeJSON(w, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, status)
 }
 
 // ── Image Upload ──
@@ -1532,4 +1687,114 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 		"type":  "error",
 		"error": map[string]string{"type": "api_error", "message": msg},
 	})
+}
+
+// ── Projects CRUD ──
+
+func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
+	cfg := config.Load()
+	type projectInfo struct {
+		Path      string `json:"path"`
+		Name      string `json:"name"`
+		Type      string `json:"type,omitempty"`
+		Framework string `json:"framework,omitempty"`
+		FileCount int    `json:"fileCount,omitempty"`
+		Active    bool   `json:"active"`
+	}
+
+	s.mu.RLock()
+	currentWork := s.workDir
+	s.mu.RUnlock()
+
+	projects := make([]projectInfo, 0, len(cfg.Projects))
+	for _, p := range cfg.Projects {
+		info := projectInfo{Path: p.Path, Name: p.Name, Active: p.Path == currentWork}
+		// Auto-detect project type
+		proj := agent.DetectProject(p.Path)
+		info.Type = proj.Type
+		info.Framework = proj.Framework
+		info.FileCount = proj.FileCount
+		if info.Name == "" {
+			info.Name = proj.Name
+		}
+		projects = append(projects, info)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(projects)
+}
+
+func (s *Server) handleAddProject(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Path string `json:"path"`
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, 400, "Invalid JSON")
+		return
+	}
+
+	// Validate directory exists
+	stat, err := os.Stat(body.Path)
+	if err != nil || !stat.IsDir() {
+		writeError(w, 400, "Directory not found: "+body.Path)
+		return
+	}
+
+	// Auto-detect name if empty
+	if body.Name == "" {
+		body.Name = filepath.Base(body.Path)
+	}
+
+	cfg := config.Load()
+
+	// Check duplicate
+	for _, p := range cfg.Projects {
+		if filepath.Clean(p.Path) == filepath.Clean(body.Path) {
+			writeError(w, 409, "Project already exists")
+			return
+		}
+	}
+
+	cfg.Projects = append(cfg.Projects, config.Project{Path: body.Path, Name: body.Name})
+	if err := config.Save(cfg); err != nil {
+		writeError(w, 500, "Failed to save config")
+		return
+	}
+
+	// Switch to the new project
+	s.SetWorkDir(body.Path)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"ok": true, "name": body.Name, "path": body.Path})
+}
+
+func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		writeError(w, 400, "path query parameter required")
+		return
+	}
+
+	cfg := config.Load()
+	found := false
+	filtered := make([]config.Project, 0, len(cfg.Projects))
+	for _, p := range cfg.Projects {
+		if filepath.Clean(p.Path) == filepath.Clean(path) {
+			found = true
+			continue
+		}
+		filtered = append(filtered, p)
+	}
+
+	if !found {
+		writeError(w, 404, "Project not found")
+		return
+	}
+
+	cfg.Projects = filtered
+	config.Save(cfg)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }

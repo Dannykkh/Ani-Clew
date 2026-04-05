@@ -12,7 +12,13 @@ type ProviderSettings struct {
 	BaseURL string `json:"baseUrl,omitempty"`
 }
 
+type Project struct {
+	Path string `json:"path"`
+	Name string `json:"name"`
+}
+
 type Config struct {
+	Projects        []Project                   `json:"projects"`       // registered projects
 	Port            int                         `json:"port"`
 	DefaultProvider string                      `json:"defaultProvider"`
 	DefaultModel    string                      `json:"defaultModel"`
@@ -23,6 +29,7 @@ type Config struct {
 	SkillDirs       []string                    `json:"skillDirs"`       // extra custom skill directories
 	MCPConfigPaths  []string                    `json:"mcpConfigPaths"`  // extra MCP config file paths
 	WorkDir         string                      `json:"workDir"`         // default workspace
+	AccessToken     string                      `json:"accessToken"`     // web UI access token (empty = no auth)
 	Providers       map[string]ProviderSettings  `json:"providers"`
 }
 

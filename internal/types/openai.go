@@ -82,6 +82,7 @@ type OAIStreamChoice struct {
 type OAIStreamDelta struct {
 	Role      string              `json:"role,omitempty"`
 	Content   *string             `json:"content,omitempty"`
+	Reasoning *string             `json:"reasoning,omitempty"` // thinking models (qwen3, deepseek-r1, etc.)
 	ToolCalls []OAIStreamToolCall `json:"tool_calls,omitempty"`
 }
 

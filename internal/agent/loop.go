@@ -213,7 +213,10 @@ func RunLoop(
 				}
 				json.Unmarshal(event.ContentBlock, &block)
 
-				if block.Type == "text" {
+				if block.Type == "thinking" {
+					// Thinking block — stream to UI
+					eventCh <- Event{Type: "status", Data: "Thinking..."}
+				} else if block.Type == "text" {
 					currentText = ""
 				} else if block.Type == "tool_use" {
 					currentTool = &toolUseBlock{ID: block.ID, Name: block.Name}
@@ -230,7 +233,14 @@ func RunLoop(
 				}
 				json.Unmarshal(event.Delta, &delta)
 
-				if delta.Type == "text_delta" {
+				if delta.Type == "thinking_delta" {
+					// Stream thinking to UI as dimmed text
+					var thinkDelta struct{ Thinking string `json:"thinking"` }
+					json.Unmarshal(event.Delta, &thinkDelta)
+					if thinkDelta.Thinking != "" {
+						eventCh <- Event{Type: "thinking", Data: thinkDelta.Thinking}
+					}
+				} else if delta.Type == "text_delta" {
 					currentText += delta.Text
 					eventCh <- Event{Type: "text", Data: delta.Text}
 				} else if delta.Type == "input_json_delta" && currentTool != nil {

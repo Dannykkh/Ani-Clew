@@ -13,10 +13,21 @@ import (
 
 const maxMemorySize = 25 * 1024 // 25KB
 
+// SafeDirName converts a workspace path to a safe directory name.
+// e.g. "D:\git\projectA" → "D--git--projectA"
+func SafeDirName(workspace string) string {
+	safe := strings.ReplaceAll(workspace, ":", "")
+	safe = strings.ReplaceAll(safe, "\\", "--")
+	safe = strings.ReplaceAll(safe, "/", "--")
+	return safe
+}
+
 // Memory represents the AutoDream persistent memory system.
+// Each workspace/project gets its own memory directory.
 type Memory struct {
 	mu       sync.RWMutex
-	dir      string // ~/.claude-proxy/memory/
+	baseDir  string // ~/.claude-proxy/
+	dir      string // current project memory dir
 	sessions int
 	lastDream time.Time
 }
@@ -40,7 +51,19 @@ type MemoryState struct {
 func NewMemory(baseDir string) *Memory {
 	dir := filepath.Join(baseDir, "memory")
 	os.MkdirAll(dir, 0755)
-	return &Memory{dir: dir}
+	return &Memory{baseDir: baseDir, dir: dir}
+}
+
+// SwitchProject changes the memory directory to a project-specific one.
+func (m *Memory) SwitchProject(workDir string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if workDir == "" {
+		m.dir = filepath.Join(m.baseDir, "memory")
+	} else {
+		m.dir = filepath.Join(m.baseDir, "projects", SafeDirName(workDir), "memory")
+	}
+	os.MkdirAll(m.dir, 0755)
 }
 
 // RecordSession increments session count and checks if dream should trigger.

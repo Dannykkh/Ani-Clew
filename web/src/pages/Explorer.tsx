@@ -56,7 +56,7 @@ export function ExplorerPage() {
   }
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-full w-full">
       {/* Left: Project Info + File List */}
       <div className="w-72 border-r border-[var(--color-border)] bg-[var(--color-surface)] flex flex-col overflow-hidden">
         {/* Project Header */}

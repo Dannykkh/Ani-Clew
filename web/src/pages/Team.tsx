@@ -32,7 +32,7 @@ export function TeamPage() {
   }
 
   return (
-    <div className="p-6">
+    <div className="p-6 w-full">
       <h1 className="text-xl font-semibold mb-6">Team Gateway</h1>
 
       {/* Add User */}

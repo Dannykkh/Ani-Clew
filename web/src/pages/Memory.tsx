@@ -32,7 +32,7 @@ export function MemoryPage() {
   }
 
   return (
-    <div className="p-6">
+    <div className="p-6 w-full">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold">AutoDream Memory</h1>
         <button onClick={dream} className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm">

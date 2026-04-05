@@ -31,8 +31,9 @@ export interface Session {
   turns: number;
 }
 
-export async function listSessions(): Promise<SessionSummary[]> {
-  return fetchJSON('/api/sessions');
+export async function listSessions(workspace?: string): Promise<SessionSummary[]> {
+  const params = workspace ? `?workspace=${encodeURIComponent(workspace)}` : '';
+  return fetchJSON(`/api/sessions${params}`);
 }
 
 export async function getSession(id: string): Promise<Session> {

@@ -40,10 +40,19 @@ func (p *OpenAICompat) StreamMessage(ctx context.Context, req *types.MessagesReq
 		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+
+	// Auth: try configured key first, then passthrough incoming header
+	authed := false
 	if p.AuthHeader != nil {
 		k, v := p.AuthHeader()
-		if k != "" {
+		if k != "" && v != "" && v != "Bearer " {
 			httpReq.Header.Set(k, v)
+			authed = true
+		}
+	}
+	if !authed && opts != nil && opts.IncomingHeaders != nil {
+		if v := opts.IncomingHeaders["authorization"]; v != "" {
+			httpReq.Header.Set("Authorization", v)
 		}
 	}
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -61,22 +63,80 @@ func DefaultDaemonConfig() DaemonConfig {
 
 // Daemon is the KAIROS always-on background agent.
 type Daemon struct {
-	mu       sync.RWMutex
-	config   DaemonConfig
-	state    State
-	tasks    []Task
-	logs     []LogEntry
-	provider types.Provider
-	model    string
-	cancel   context.CancelFunc
+	mu            sync.RWMutex
+	config        DaemonConfig
+	state         State
+	tasks         []Task
+	logs          []LogEntry
+	provider      types.Provider
+	model         string
+	workDir       string // current project directory
+	baseDir       string // ~/.claude-proxy/
+	cancel        context.CancelFunc
+	lastGitStatus *GitStatus
+	notifier      *Notifier
 }
 
 func NewDaemon(cfg DaemonConfig) *Daemon {
 	return &Daemon{
-		config: cfg,
-		state:  StateIdle,
-		logs:   make([]LogEntry, 0, 1000),
+		config:   cfg,
+		state:    StateIdle,
+		logs:     make([]LogEntry, 0, 1000),
+		notifier: NewNotifier(),
 	}
+}
+
+// Notifier returns the daemon's notifier.
+func (d *Daemon) Notifier() *Notifier {
+	return d.notifier
+}
+
+// SetBaseDir sets the base storage directory.
+func (d *Daemon) SetBaseDir(baseDir string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.baseDir = baseDir
+}
+
+// SwitchProject changes the daemon to work on a specific project.
+func (d *Daemon) SwitchProject(workDir string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.workDir = workDir
+	// Load project-specific tasks
+	d.tasks = d.loadTasks()
+}
+
+func (d *Daemon) projectDir() string {
+	if d.workDir == "" || d.baseDir == "" {
+		return ""
+	}
+	dir := filepath.Join(d.baseDir, "projects", SafeDirName(d.workDir))
+	os.MkdirAll(dir, 0755)
+	return dir
+}
+
+func (d *Daemon) loadTasks() []Task {
+	dir := d.projectDir()
+	if dir == "" {
+		return nil
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "tasks.json"))
+	if err != nil {
+		return nil
+	}
+	var tasks []Task
+	json.Unmarshal(data, &tasks)
+	return tasks
+}
+
+func (d *Daemon) saveTasks() {
+	dir := d.projectDir()
+	if dir == "" {
+		return
+	}
+	data, _ := json.MarshalIndent(d.tasks, "", "  ")
+	os.WriteFile(filepath.Join(dir, "tasks.json"), data, 0644)
 }
 
 func (d *Daemon) SetProvider(p types.Provider, model string) {
@@ -179,6 +239,13 @@ func (d *Daemon) onTick(ctx context.Context, now time.Time) {
 }
 
 func (d *Daemon) executeTask(ctx context.Context, task Task, autonomy string) {
+	// Built-in task types
+	switch task.Type {
+	case "git-watch":
+		d.RunGitWatch()
+		return
+	}
+
 	d.mu.RLock()
 	provider := d.provider
 	model := d.model
@@ -253,6 +320,7 @@ func (d *Daemon) AddTask(task Task) {
 	task.CreatedAt = time.Now()
 	task.Enabled = true
 	d.tasks = append(d.tasks, task)
+	d.saveTasks()
 	d.addLogLocked("task-added", task.Description)
 }
 
@@ -262,6 +330,7 @@ func (d *Daemon) RemoveTask(id string) {
 	for i, t := range d.tasks {
 		if t.ID == id {
 			d.tasks = append(d.tasks[:i], d.tasks[i+1:]...)
+			d.saveTasks()
 			return
 		}
 	}

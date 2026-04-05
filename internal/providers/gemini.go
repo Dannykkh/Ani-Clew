@@ -44,14 +44,24 @@ func (p *GeminiProvider) Validate() error {
 	return nil
 }
 
-func (p *GeminiProvider) StreamMessage(ctx context.Context, req *types.MessagesRequest, _ *types.StreamOptions) (<-chan types.SSEEvent, error) {
+func (p *GeminiProvider) StreamMessage(ctx context.Context, req *types.MessagesRequest, opts *types.StreamOptions) (<-chan types.SSEEvent, error) {
 	geminiReq := buildGeminiRequest(req)
 	body, err := json.Marshal(geminiReq)
 	if err != nil {
 		return nil, err
 	}
 
-	url := fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?alt=sse&key=%s", p.baseURL, req.Model, p.apiKey)
+	// Auth: configured key first, then passthrough incoming header
+	apiKey := p.apiKey
+	if apiKey == "" && opts != nil && opts.IncomingHeaders != nil {
+		if v := opts.IncomingHeaders["x-goog-api-key"]; v != "" {
+			apiKey = v
+		} else if v := opts.IncomingHeaders["authorization"]; v != "" {
+			apiKey = strings.TrimPrefix(v, "Bearer ")
+		}
+	}
+
+	url := fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?alt=sse&key=%s", p.baseURL, req.Model, apiKey)
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err

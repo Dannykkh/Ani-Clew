@@ -37,12 +37,11 @@ function Icon({ name, size = 18 }: { name: string; size?: number }) {
 interface Props {
   active: string;
   onNavigate: (id: string) => void;
-  onLangToggle: () => void;
   onThemeToggle: () => void;
   theme: 'dark' | 'light';
 }
 
-export function ActivityBar({ active, onNavigate, onLangToggle, onThemeToggle, theme }: Props) {
+export function ActivityBar({ active, onNavigate, onThemeToggle, theme }: Props) {
   const ko = getLang() === 'ko';
   const top = items.filter(i => i.section === 'top');
   const bottom = items.filter(i => i.section === 'bottom');
@@ -67,9 +66,6 @@ export function ActivityBar({ active, onNavigate, onLangToggle, onThemeToggle, t
             <Icon name={item.id} />
           </button>
         ))}
-        <button onClick={onLangToggle} title="Language" className="w-10 h-10 rounded-lg flex items-center justify-center text-[var(--color-text2)] hover:bg-[var(--color-surface2)]">
-          <Icon name="lang" />
-        </button>
         <button onClick={onThemeToggle} title="Theme" className="w-10 h-10 rounded-lg flex items-center justify-center text-[var(--color-text2)] hover:bg-[var(--color-surface2)]">
           <Icon name={theme === 'dark' ? 'sun' : 'moon'} />
         </button>

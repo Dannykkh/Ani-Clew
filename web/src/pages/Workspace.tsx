@@ -85,7 +85,7 @@ export function WorkspacePage() {
   };
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="p-6 w-full max-w-4xl mx-auto">
       <h1 className="text-xl font-semibold mb-2">{ko ? '워크스페이스' : 'Workspace'}</h1>
       <p className="text-sm text-[var(--color-text2)] mb-6">
         {ko ? '프로젝트 폴더를 선택하면 채팅과 도구가 해당 폴더에서 동작합니다.' : 'Select a project folder. Chat and tools will operate in this directory.'}

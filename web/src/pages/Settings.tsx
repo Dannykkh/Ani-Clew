@@ -10,6 +10,7 @@ export function SettingsPage() {
   const [responseLang, setResponseLang] = useState('auto');
   const [skillSource, setSkillSource] = useState('all');
   const [saved, setSaved] = useState(false);
+  const [mcpServers, setMcpServers] = useState<any[]>([]);
 
   useEffect(() => {
     fetchJSON<ProviderInfo[]>('/api/providers').then(setProviders);
@@ -19,6 +20,7 @@ export function SettingsPage() {
       setSelModel(c.model);
       setResponseLang(c.responseLang || 'auto');
     });
+    fetchJSON<any[]>('/api/mcp').then(setMcpServers).catch(() => setMcpServers([]));
   }, []);
 
   const models = providers.find((p) => p.name === selProvider)?.models || [];
@@ -37,7 +39,7 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
+    <div className="p-6 w-full max-w-3xl mx-auto">
       <h1 className="text-xl font-semibold mb-6">{t('settings.title')}</h1>
 
       {/* Provider & Model */}
@@ -178,6 +180,45 @@ export function SettingsPage() {
             ))}
           </div>
         </div>
+      </div>
+
+      {/* MCP Servers */}
+      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-6 mt-4">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-[var(--color-text2)] uppercase tracking-wide">MCP Servers</h2>
+          <button
+            onClick={async () => {
+              await fetchJSON('/api/mcp/connect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+              const data = await fetchJSON<any[]>('/api/mcp');
+              setMcpServers(data);
+            }}
+            className="text-xs px-3 py-1.5 bg-[var(--color-accent)] text-white rounded-lg hover:opacity-80"
+          >
+            Reconnect
+          </button>
+        </div>
+        {mcpServers.length === 0 ? (
+          <div className="text-xs text-[var(--color-text2)]">
+            No MCP servers configured. Add servers in <code className="bg-[var(--color-bg)] px-1 rounded">.mcp.json</code> or <code className="bg-[var(--color-bg)] px-1 rounded">.claude/settings.json</code>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {mcpServers.map((srv: any, i: number) => (
+              <div key={i} className="flex items-center justify-between bg-[var(--color-bg)] rounded-lg px-3 py-2">
+                <div>
+                  <div className="text-sm font-medium">{srv.name || `Server ${i + 1}`}</div>
+                  <div className="text-[10px] text-[var(--color-text2)]">{srv.command || srv.url || '—'}</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${srv.connected ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                    {srv.connected ? 'Connected' : 'Disconnected'}
+                  </span>
+                  <span className="text-[10px] text-[var(--color-text2)]">{srv.tools || 0} tools</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

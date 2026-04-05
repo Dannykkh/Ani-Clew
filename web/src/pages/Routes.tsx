@@ -54,7 +54,7 @@ export function RoutesPage() {
   }
 
   return (
-    <div className="p-6">
+    <div className="p-6 w-full">
       <h1 className="text-xl font-semibold mb-2">{t('routes.title')}</h1>
       <p className="text-sm text-[var(--color-text2)] mb-6">{t('routes.desc')}</p>
 

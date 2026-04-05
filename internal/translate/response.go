@@ -11,12 +11,13 @@ import (
 
 // Translator converts OpenAI stream chunks into Anthropic SSE events.
 type Translator struct {
-	model       string
-	messageID   string
-	blockIndex  int
-	textOpen    bool
-	toolCalls   map[int]string // index -> tool ID
-	outTokens   int
+	model        string
+	messageID    string
+	blockIndex   int
+	textOpen     bool
+	thinkingOpen bool
+	toolCalls    map[int]string // index -> tool ID
+	outTokens    int
 }
 
 func NewTranslator(model string) *Translator {
@@ -56,8 +57,38 @@ func (t *Translator) Translate(chunk types.OAIStreamChunk) []types.SSEEvent {
 	choice := chunk.Choices[0]
 	delta := choice.Delta
 
+	// ── Reasoning/thinking content ──
+	if delta.Reasoning != nil && *delta.Reasoning != "" {
+		if !t.thinkingOpen {
+			// Close text block if open
+			if t.textOpen {
+				events = append(events, t.closeTextBlock()...)
+			}
+			idx := t.blockIndex
+			events = append(events, types.SSEEvent{
+				Type:         "content_block_start",
+				Index:        &idx,
+				ContentBlock: mustMarshal(map[string]string{"type": "thinking", "thinking": ""}),
+			})
+			t.thinkingOpen = true
+		}
+		idx := t.blockIndex
+		events = append(events, types.SSEEvent{
+			Type:  "content_block_delta",
+			Index: &idx,
+			Delta: mustMarshal(map[string]string{"type": "thinking_delta", "thinking": *delta.Reasoning}),
+		})
+	}
+
 	// ── Text content ──
 	if delta.Content != nil && *delta.Content != "" {
+		// Close thinking block if open (transition from thinking to answer)
+		if t.thinkingOpen {
+			idx := t.blockIndex
+			events = append(events, types.SSEEvent{Type: "content_block_stop", Index: &idx})
+			t.blockIndex++
+			t.thinkingOpen = false
+		}
 		if !t.textOpen {
 			idx := t.blockIndex
 			events = append(events, types.SSEEvent{
@@ -118,6 +149,12 @@ func (t *Translator) Translate(chunk types.OAIStreamChunk) []types.SSEEvent {
 // End produces final events if stream ended without explicit finish.
 func (t *Translator) End() []types.SSEEvent {
 	var events []types.SSEEvent
+	if t.thinkingOpen {
+		idx := t.blockIndex
+		events = append(events, types.SSEEvent{Type: "content_block_stop", Index: &idx})
+		t.blockIndex++
+		t.thinkingOpen = false
+	}
 	if t.textOpen {
 		events = append(events, t.closeTextBlock()...)
 	}
@@ -132,6 +169,12 @@ func (t *Translator) End() []types.SSEEvent {
 
 func (t *Translator) Finish(reason string) []types.SSEEvent {
 	var events []types.SSEEvent
+	if t.thinkingOpen {
+		idx := t.blockIndex
+		events = append(events, types.SSEEvent{Type: "content_block_stop", Index: &idx})
+		t.blockIndex++
+		t.thinkingOpen = false
+	}
 	if t.textOpen {
 		events = append(events, t.closeTextBlock()...)
 	}

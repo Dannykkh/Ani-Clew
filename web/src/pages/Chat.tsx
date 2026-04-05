@@ -13,7 +13,12 @@ interface ChatMessage {
   timestamp: Date;
 }
 
-export function ChatPage() {
+interface ChatPageProps {
+  loadSessionId?: string | null;
+  onSessionLoaded?: () => void;
+}
+
+export function ChatPage({ loadSessionId, onSessionLoaded }: ChatPageProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
@@ -21,7 +26,7 @@ export function ChatPage() {
   const [attachedImage, setAttachedImage] = useState<string | null>(null); // base64
   const [isListening, setIsListening] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [_sessions, setSessions] = useState<SessionSummary[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -29,6 +34,17 @@ export function ChatPage() {
   useEffect(() => {
     listSessions().then(setSessions).catch(() => {});
   }, []);
+
+  // Handle session load/new from SidePanel
+  useEffect(() => {
+    if (!loadSessionId) return;
+    if (loadSessionId === '__new__') {
+      newChat();
+    } else {
+      loadSession(loadSessionId);
+    }
+    onSessionLoaded?.();
+  }, [loadSessionId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -53,8 +69,7 @@ export function ChatPage() {
     listSessions().then(setSessions).catch(() => {});
   }, []);
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async function loadSession(id: string) {
+  const loadSession = async (id: string) => {
     const sess = await getSession(id);
     const msgs: ChatMessage[] = (sess.messages || []).map((m) => ({
       ...m,
@@ -62,21 +77,21 @@ export function ChatPage() {
     }));
     setMessages(msgs);
     setSessionId(sess.id);
-  }
+  };
 
   function newChat() {
     setMessages([]);
     setSessionId(null);
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async function handleDelete(id: string) {
+  // @ts-expect-error reserved for SidePanel session list
+  const _handleDelete = async (id: string) => {
     await deleteSession(id);
     setSessions((prev) => prev.filter((s) => s.id !== id));
     if (sessionId === id) {
       newChat();
     }
-  }
+  };
 
   async function send() {
     const text = input.trim();
@@ -155,12 +170,26 @@ export function ChatPage() {
 
   function handleAgentEvent(event: { type: string; data: any }) {
     switch (event.type) {
+      case 'thinking':
+        // Append thinking text to assistant message (wrapped in <think> tags for rendering)
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            const thinkTag = last.content.includes('<think>') ? '' : '<think>';
+            updated[updated.length - 1] = { ...last, content: last.content + thinkTag + event.data };
+          }
+          return updated;
+        });
+        break;
       case 'text':
         setMessages((prev) => {
           const updated = [...prev];
           const last = updated[updated.length - 1];
           if (last?.role === 'assistant') {
-            updated[updated.length - 1] = { ...last, content: last.content + event.data };
+            // Close thinking block if transitioning to text
+            const closingTag = last.content.includes('<think>') && !last.content.includes('</think>') ? '</think>\n\n' : '';
+            updated[updated.length - 1] = { ...last, content: last.content + closingTag + event.data };
           }
           return updated;
         });

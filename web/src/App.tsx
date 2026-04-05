@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { ActivityBar } from './components/ActivityBar';
 import { SidePanel } from './components/SidePanel';
 import { ChatPage } from './pages/Chat';
@@ -8,16 +8,36 @@ import { KairosPage } from './pages/Kairos';
 import { SettingsPage } from './pages/Settings';
 import { MemoryPage } from './pages/Memory';
 import { TeamPage } from './pages/Team';
-import { fetchJSON } from './lib/api';
-import { setLang, getLang } from './lib/i18n';
+import { fetchJSON, putJSON } from './lib/api';
+import './lib/i18n';
+
+interface ProjectInfo {
+  path: string;
+  name: string;
+  type: string;
+  framework: string;
+  fileCount: number;
+  active: boolean;
+}
 
 function App() {
   const [page, setPage] = useState('chat');
-  const [, setLangTick] = useState(0);
   const [theme, setTheme] = useState<'dark' | 'light'>(() =>
     (localStorage.getItem('aniclew-theme') as 'dark' | 'light') || 'dark'
   );
   const [status, setStatus] = useState<any>(null);
+  const [loadSessionId, setLoadSessionId] = useState<string | null>(null);
+  const [projects, setProjects] = useState<ProjectInfo[]>([]);
+  const [showProjectPicker, setShowProjectPicker] = useState(false);
+
+  const activeProject = projects.find(p => p.active);
+
+  const loadProjects = useCallback(async () => {
+    try {
+      const data = await fetchJSON<ProjectInfo[]>('/api/projects');
+      setProjects(data);
+    } catch { setProjects([]); }
+  }, []);
 
   useEffect(() => {
     const load = async () => {
@@ -27,9 +47,16 @@ function App() {
       } catch { setStatus(null); }
     };
     load();
+    loadProjects();
     const interval = setInterval(load, 15000);
     return () => clearInterval(interval);
-  }, []);
+  }, [loadProjects]);
+
+  async function switchProject(path: string) {
+    await putJSON('/api/workspace', { path });
+    await loadProjects();
+    setShowProjectPicker(false);
+  }
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -42,15 +69,11 @@ function App() {
 
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen w-full">
       {/* Activity Bar (always visible) */}
       <ActivityBar
         active={page}
         onNavigate={setPage}
-        onLangToggle={() => {
-          setLang(getLang() === 'ko' ? 'en' : 'ko');
-          setLangTick(n => n + 1);
-        }}
         onThemeToggle={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
         theme={theme}
       />
@@ -60,14 +83,16 @@ function App() {
         <SidePanel
           visible={true}
           mode={sidePanelMode as 'files' | 'chat'}
-          onNewChat={() => { /* handled in Chat */ }}
+          onNewChat={() => setLoadSessionId('__new__')}
+          onSessionClick={(id) => setLoadSessionId(id)}
+          onProjectSwitch={() => loadProjects()}
         />
       )}
 
       {/* Main Content */}
-      <main className="flex-1 min-w-0 h-screen overflow-hidden">
-        {page === 'chat' && <ChatPage />}
-        {page === 'files' && <ChatPage />} {/* Files mode = chat with file panel */}
+      <main className="flex-1 min-w-0 h-[calc(100vh-24px)] overflow-hidden flex">
+        {page === 'chat' && <ChatPage loadSessionId={loadSessionId} onSessionLoaded={() => setLoadSessionId(null)} />}
+        {page === 'files' && <ChatPage loadSessionId={loadSessionId} onSessionLoaded={() => setLoadSessionId(null)} />}
         {page === 'routes' && <RoutesPage />}
         {page === 'costs' && <CostsPage />}
         {page === 'kairos' && <KairosPage />}
@@ -91,6 +116,33 @@ function App() {
           {status ? `${status.provider} / ${status.model}` : 'Offline'}
         </div>
         {status?.routerEnabled && <span>Router ON</span>}
+
+        {/* Project Picker in Status Bar */}
+        <div className="relative">
+          <button
+            onClick={() => setShowProjectPicker(!showProjectPicker)}
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-[var(--color-surface2)] transition-colors"
+          >
+            <span>{activeProject ? `${activeProject.name}` : 'No Project'}</span>
+            <span>{showProjectPicker ? '▴' : '▾'}</span>
+          </button>
+          {showProjectPicker && projects.length > 0 && (
+            <div className="absolute bottom-6 left-0 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg shadow-lg min-w-48 max-h-60 overflow-y-auto z-50">
+              {projects.map(p => (
+                <button
+                  key={p.path}
+                  onClick={() => switchProject(p.path)}
+                  className={`w-full text-left px-3 py-1.5 text-[11px] hover:bg-[var(--color-surface2)] transition-colors flex items-center gap-2 ${p.active ? 'text-[var(--color-accent)]' : ''}`}
+                >
+                  <span>{p.active ? '●' : '○'}</span>
+                  <span className="truncate">{p.name}</span>
+                  <span className="text-[9px] text-[var(--color-text2)] ml-auto">{p.type}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div className="ml-auto">AniClew v1.0</div>
       </div>
     </div>

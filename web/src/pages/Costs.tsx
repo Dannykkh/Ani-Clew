@@ -14,7 +14,7 @@ export function CostsPage() {
   const maxCost = Math.max(...costs.breakdown.map((b) => b.cost), 0.001);
 
   return (
-    <div className="p-6">
+    <div className="p-6 w-full">
       <h1 className="text-xl font-semibold mb-6">Cost Breakdown</h1>
 
       {/* Summary Cards */}
