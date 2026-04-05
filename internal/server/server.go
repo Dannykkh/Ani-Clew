@@ -411,8 +411,33 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 	req.Model = model
 
-	ch, err := provider.StreamMessage(r.Context(), &req, opts)
-	if err != nil {
+	// ── Stream with retry ──
+	var ch <-chan types.SSEEvent
+	retryCfg := apiPkg.DefaultRetryConfig()
+	retryCfg.MaxRetries = 3 // keep it fast for streaming
+
+	var lastErr error
+	for attempt := 1; attempt <= retryCfg.MaxRetries; attempt++ {
+		ch, lastErr = provider.StreamMessage(r.Context(), &req, opts)
+		if lastErr == nil {
+			break
+		}
+
+		log.Printf("[Proxy] Attempt %d/%d failed: %v", attempt, retryCfg.MaxRetries, lastErr)
+
+		if attempt < retryCfg.MaxRetries {
+			delay := apiPkg.CalculateBackoff(attempt, retryCfg, "")
+			log.Printf("[Proxy] Retrying in %v", delay)
+			select {
+			case <-r.Context().Done():
+				writeError(w, 499, "Client disconnected")
+				return
+			case <-time.After(delay):
+			}
+		}
+	}
+
+	if lastErr != nil {
 		// ── Fallback on failure ──
 		if rt != nil {
 			decision := rt.Route(&req)
@@ -424,12 +449,12 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 				})
 				if fbErr == nil {
 					req.Model = fallback.Model
-					ch, err = fbProvider.StreamMessage(r.Context(), &req, opts)
+					ch, lastErr = fbProvider.StreamMessage(r.Context(), &req, opts)
 				}
 			}
 		}
-		if err != nil {
-			writeError(w, 502, err.Error())
+		if lastErr != nil {
+			writeError(w, 502, lastErr.Error())
 			return
 		}
 	}

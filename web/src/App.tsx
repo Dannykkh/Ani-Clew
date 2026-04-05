@@ -29,6 +29,7 @@ function App() {
   const [loadSessionId, setLoadSessionId] = useState<string | null>(null);
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [showProjectPicker, setShowProjectPicker] = useState(false);
+  const [viewingFile, setViewingFile] = useState<{ path: string; content: string } | null>(null);
 
   const activeProject = projects.find(p => p.active);
 
@@ -86,13 +87,31 @@ function App() {
           onNewChat={() => setLoadSessionId('__new__')}
           onSessionClick={(id) => setLoadSessionId(id)}
           onProjectSwitch={() => loadProjects()}
+          onFileClick={async (path) => {
+            try {
+              const data = await fetchJSON<any>(`/api/file?path=${encodeURIComponent(path)}`);
+              setViewingFile({ path, content: data.content || data });
+            } catch { setViewingFile({ path, content: 'Failed to load file' }); }
+          }}
         />
       )}
 
       {/* Main Content */}
       <main className="flex-1 min-w-0 h-[calc(100vh-24px)] overflow-hidden flex">
         {page === 'chat' && <ChatPage loadSessionId={loadSessionId} onSessionLoaded={() => setLoadSessionId(null)} />}
-        {page === 'files' && <ChatPage loadSessionId={loadSessionId} onSessionLoaded={() => setLoadSessionId(null)} />}
+        {page === 'files' && (
+          viewingFile ? (
+            <div className="flex flex-col h-full w-full">
+              <div className="px-4 py-1.5 border-b border-[var(--color-border)] bg-[var(--color-surface)] flex items-center justify-between">
+                <div className="text-xs font-mono text-[var(--color-accent)]">{viewingFile.path}</div>
+                <button onClick={() => setViewingFile(null)} className="text-xs text-[var(--color-text2)] hover:text-[var(--color-text)]">Close</button>
+              </div>
+              <pre className="flex-1 overflow-auto p-4 text-xs font-mono text-[var(--color-text)] bg-[var(--color-bg)] leading-relaxed whitespace-pre-wrap">{viewingFile.content}</pre>
+            </div>
+          ) : (
+            <ChatPage loadSessionId={loadSessionId} onSessionLoaded={() => setLoadSessionId(null)} />
+          )
+        )}
         {page === 'routes' && <RoutesPage />}
         {page === 'costs' && <CostsPage />}
         {page === 'kairos' && <KairosPage />}

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // ── JSON-RPC 2.0 Types ──
@@ -206,6 +207,8 @@ func (c *MCPClient) Close() {
 
 // ── Internal JSON-RPC communication ──
 
+const mcpCallTimeout = 30 * time.Second
+
 func (c *MCPClient) call(method string, params interface{}) (json.RawMessage, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -220,27 +223,38 @@ func (c *MCPClient) call(method string, params interface{}) (json.RawMessage, er
 	}
 
 	data, _ := json.Marshal(req)
-	// MCP stdio: each message is a line of JSON
 	if _, err := fmt.Fprintf(c.stdin, "%s\n", data); err != nil {
 		return nil, fmt.Errorf("write: %w", err)
 	}
 
-	// Read response
-	line, err := c.stdout.ReadBytes('\n')
-	if err != nil {
-		return nil, fmt.Errorf("read: %w", err)
+	// Read response with timeout
+	type readResult struct {
+		line []byte
+		err  error
 	}
+	ch := make(chan readResult, 1)
+	go func() {
+		line, err := c.stdout.ReadBytes('\n')
+		ch <- readResult{line, err}
+	}()
 
-	var resp jsonRPCResponse
-	if err := json.Unmarshal(line, &resp); err != nil {
-		return nil, fmt.Errorf("parse response: %w", err)
+	select {
+	case result := <-ch:
+		if result.err != nil {
+			return nil, fmt.Errorf("read: %w", result.err)
+		}
+		var resp jsonRPCResponse
+		if err := json.Unmarshal(result.line, &resp); err != nil {
+			return nil, fmt.Errorf("parse response: %w", err)
+		}
+		if resp.Error != nil {
+			return nil, fmt.Errorf("RPC error %d: %s", resp.Error.Code, resp.Error.Message)
+		}
+		return resp.Result, nil
+
+	case <-time.After(mcpCallTimeout):
+		return nil, fmt.Errorf("MCP call '%s' timed out after %v", method, mcpCallTimeout)
 	}
-
-	if resp.Error != nil {
-		return nil, fmt.Errorf("RPC error %d: %s", resp.Error.Code, resp.Error.Message)
-	}
-
-	return resp.Result, nil
 }
 
 func (c *MCPClient) notify(method string, params interface{}) {

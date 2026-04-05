@@ -315,9 +315,65 @@ func RunLoop(
 			}
 		}
 
+		// ── Partition tools into concurrent-safe vs serial ──
+		var concurrentTools, serialTools []toolUseBlock
+		for _, tu := range toolUses {
+			inputMap := make(map[string]interface{})
+			json.Unmarshal(tu.Input, &inputMap)
+			if IsConcurrencySafe(tu.Name, inputMap) {
+				concurrentTools = append(concurrentTools, tu)
+			} else {
+				serialTools = append(serialTools, tu)
+			}
+		}
+		if len(concurrentTools) > 1 {
+			log.Printf("[Agent] Parallel: %d concurrent + %d serial", len(concurrentTools), len(serialTools))
+		}
+
 		// ── Execute tools and collect results ──
 		var toolResults []map[string]interface{}
-		for _, tu := range toolUses {
+		// First: run concurrent-safe tools in parallel
+		if len(concurrentTools) > 1 {
+			type toolResultEntry struct {
+				idx    int
+				result map[string]interface{}
+				event  Event
+			}
+			resultCh := make(chan toolResultEntry, len(concurrentTools))
+
+			for idx, tu := range concurrentTools {
+				go func(i int, t toolUseBlock) {
+					r, isErr := ExecuteTool(t.Name, t.Input, workDir)
+					resultCh <- toolResultEntry{
+						idx: i,
+						result: map[string]interface{}{
+							"type": "tool_result", "tool_use_id": t.ID,
+							"content": r, "is_error": isErr,
+						},
+						event: Event{Type: "tool_result", Data: map[string]interface{}{
+							"id": t.ID, "name": t.Name, "result": truncateStr(r, 2000), "isError": isErr,
+						}},
+					}
+				}(idx, tu)
+			}
+
+			// Collect parallel results
+			collected := make([]toolResultEntry, len(concurrentTools))
+			for i := 0; i < len(concurrentTools); i++ {
+				entry := <-resultCh
+				collected[entry.idx] = entry
+			}
+			for _, entry := range collected {
+				eventCh <- entry.event
+				toolResults = append(toolResults, entry.result)
+			}
+		} else {
+			// Run single concurrent tool normally (falls through to serial loop)
+			serialTools = append(concurrentTools, serialTools...)
+		}
+
+		// Then: run serial tools one by one
+		for _, tu := range serialTools {
 			log.Printf("[Agent] Executing: %s", tu.Name)
 
 			// ── Pre-tool hook ──

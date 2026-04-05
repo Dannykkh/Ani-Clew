@@ -32,7 +32,11 @@ func ShouldCompact(cfg CompactConfig, currentTokens int) bool {
 	}
 	effective := cfg.ContextWindow - maxOutputReserve
 	threshold := effective - compactMargin
-	return currentTokens > threshold
+	shouldCompact := currentTokens > threshold
+	if shouldCompact {
+		log.Printf("[Compact] Trigger: %d tokens > %d threshold (window=%d)", currentTokens, threshold, cfg.ContextWindow)
+	}
+	return shouldCompact
 }
 
 // CompactMessages summarizes older messages to reduce token count.
