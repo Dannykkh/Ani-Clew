@@ -190,6 +190,12 @@ func (m *Mailbox) loadInbox(agentID string) []TeamMessage {
 func (m *Mailbox) saveInbox(agentID string, messages []TeamMessage) {
 	path := filepath.Join(m.dir, agentID+".json")
 	data, _ := json.MarshalIndent(messages, "", "  ")
+
+	// File lock for cross-process safety
+	lockPath := path + ".lock"
+	m.acquireFileLock(lockPath)
+	defer m.releaseFileLock(lockPath)
+
 	// Atomic write: write to temp then rename
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0644); err != nil {
@@ -197,4 +203,46 @@ func (m *Mailbox) saveInbox(agentID string, messages []TeamMessage) {
 		return
 	}
 	os.Rename(tmp, path)
+}
+
+func (m *Mailbox) loadInboxLocked(agentID string) []TeamMessage {
+	path := filepath.Join(m.dir, agentID+".json")
+	lockPath := path + ".lock"
+	m.acquireFileLock(lockPath)
+	defer m.releaseFileLock(lockPath)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var messages []TeamMessage
+	json.Unmarshal(data, &messages)
+	return messages
+}
+
+// acquireFileLock creates a lock file with retries.
+func (m *Mailbox) acquireFileLock(lockPath string) {
+	maxRetries := 10
+	for i := 0; i < maxRetries; i++ {
+		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+		if err == nil {
+			f.Close()
+			return
+		}
+		// Check if lock is stale (older than 5 seconds)
+		if info, statErr := os.Stat(lockPath); statErr == nil {
+			if time.Since(info.ModTime()) > 5*time.Second {
+				os.Remove(lockPath)
+				continue
+			}
+		}
+		time.Sleep(time.Duration(5+i*10) * time.Millisecond)
+	}
+	// Give up — proceed without lock (better than deadlock)
+	os.Remove(lockPath)
+}
+
+// releaseFileLock removes the lock file.
+func (m *Mailbox) releaseFileLock(lockPath string) {
+	os.Remove(lockPath)
 }

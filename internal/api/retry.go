@@ -14,19 +14,42 @@ import (
 
 // RetryConfig controls retry behavior.
 type RetryConfig struct {
-	MaxRetries      int           // max attempts (default 10)
-	BaseDelay       time.Duration // initial delay (default 500ms)
-	MaxDelay        time.Duration // cap delay (default 32s)
-	PersistentMode  bool          // for unattended: infinite retries, up to 5min delay
+	MaxRetries        int           // max attempts (default 10)
+	BaseDelay         time.Duration // initial delay (default 500ms)
+	MaxDelay          time.Duration // cap delay (default 32s)
+	PersistentMode    bool          // for unattended: infinite retries, up to 5min delay
+	FallbackModel     string        // model to switch to after consecutive 529s
+	Max529BeforeFallback int        // consecutive 529s before fallback (default 3)
+}
+
+// FallbackModels maps primary models to their fallback.
+var FallbackModels = map[string]string{
+	"claude-opus-4-6-20250205":   "claude-sonnet-4-6-20250217",
+	"claude-opus-4-20250514":     "claude-sonnet-4-20250514",
+	"gpt-5.4":                    "gpt-5.4-mini",
+	"gpt-4o":                     "gpt-4o-mini",
+	"gemini-3-pro-preview":       "gemini-3-flash-preview",
+	"gemini-2.5-pro":             "gemini-2.5-flash",
+	"qwen3:72b":                  "qwen3:32b",
+	"qwen3:32b":                  "qwen3:14b",
 }
 
 // DefaultRetryConfig returns standard retry settings.
 func DefaultRetryConfig() RetryConfig {
 	return RetryConfig{
-		MaxRetries: 10,
-		BaseDelay:  500 * time.Millisecond,
-		MaxDelay:   32 * time.Second,
+		MaxRetries:           10,
+		BaseDelay:            500 * time.Millisecond,
+		MaxDelay:             32 * time.Second,
+		Max529BeforeFallback: 3,
 	}
+}
+
+// GetFallbackModel returns the fallback model for a given primary, or empty string.
+func GetFallbackModel(model string) string {
+	if fb, ok := FallbackModels[model]; ok {
+		return fb
+	}
+	return ""
 }
 
 // RetryResult holds the outcome of a retry-wrapped operation.

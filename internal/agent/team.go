@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -291,7 +292,12 @@ func (t *Team) executeTask(ctx context.Context, task *TeamTask) {
 	innerEventCh := make(chan Event, 100)
 	go RunLoop(workerCtx, t.provider, t.model, messages, t.workDir, "auto", innerEventCh)
 
-	// Collect results + check mailbox for shutdown
+	// Disk-based output: write to file instead of accumulating in memory
+	outputDir := filepath.Join(t.baseDir, "teams", t.config.Name, "output")
+	os.MkdirAll(outputDir, 0755)
+	outputPath := filepath.Join(outputDir, task.ID+".txt")
+	outputFile, _ := os.Create(outputPath)
+
 	var result string
 	toolCalls := 0
 	for event := range innerEventCh {
@@ -299,9 +305,17 @@ func (t *Team) executeTask(ctx context.Context, task *TeamTask) {
 		case "text":
 			if text, ok := event.Data.(string); ok {
 				result += text
+				if outputFile != nil {
+					outputFile.WriteString(text)
+				}
 			}
 		case "tool_result":
 			toolCalls++
+			if outputFile != nil {
+				if data, ok := event.Data.(map[string]interface{}); ok {
+					fmt.Fprintf(outputFile, "\n[tool:%s] %v\n", data["name"], truncateStr(fmt.Sprint(data["result"]), 500))
+				}
+			}
 		}
 
 		// Check mailbox for shutdown requests
@@ -312,6 +326,14 @@ func (t *Team) executeTask(ctx context.Context, task *TeamTask) {
 				workerCancel()
 			}
 		}
+	}
+	if outputFile != nil {
+		outputFile.Close()
+	}
+
+	// Keep only summary in memory (not full output)
+	if len(result) > 500 {
+		result = result[:500] + "... (full output: " + outputPath + ")"
 	}
 
 	// Update task status

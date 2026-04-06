@@ -414,10 +414,11 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 	req.Model = model
 
-	// ── Stream with retry ──
+	// ── Stream with retry + 529 fallback ──
 	var ch <-chan types.SSEEvent
 	retryCfg := apiPkg.DefaultRetryConfig()
-	retryCfg.MaxRetries = 3 // keep it fast for streaming
+	retryCfg.MaxRetries = 5
+	consecutive529 := 0
 
 	var lastErr error
 	for attempt := 1; attempt <= retryCfg.MaxRetries; attempt++ {
@@ -427,6 +428,19 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		}
 
 		log.Printf("[Proxy] Attempt %d/%d failed: %v", attempt, retryCfg.MaxRetries, lastErr)
+
+		// Track 529s for fallback
+		if strings.Contains(lastErr.Error(), "529") || strings.Contains(lastErr.Error(), "overloaded") {
+			consecutive529++
+			if consecutive529 >= retryCfg.Max529BeforeFallback {
+				if fb := apiPkg.GetFallbackModel(model); fb != "" {
+					log.Printf("[Proxy] %d consecutive 529s — falling back %s → %s", consecutive529, model, fb)
+					model = fb
+					req.Model = model
+					consecutive529 = 0
+				}
+			}
+		}
 
 		if attempt < retryCfg.MaxRetries {
 			delay := apiPkg.CalculateBackoff(attempt, retryCfg, "")
