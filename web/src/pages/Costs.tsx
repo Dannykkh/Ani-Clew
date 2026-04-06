@@ -6,6 +6,9 @@ export function CostsPage() {
   const [metrics, setMetrics] = useState<any>(null);
   const [traces, setTraces] = useState<any[]>([]);
   const [feedbackStats, setFeedbackStats] = useState<any>(null);
+  const [abPrompt, setAbPrompt] = useState('');
+  const [abRunning, setAbRunning] = useState(false);
+  const [abResults, setAbResults] = useState<any[]>([]);
 
   useEffect(() => {
     load();
@@ -170,6 +173,58 @@ export function CostsPage() {
             </div>
           ))
         )}
+      </div>
+
+      {/* A/B Model Test */}
+      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-4 mt-6">
+        <div className="text-xs text-[var(--color-text2)] uppercase mb-3">A/B Model Comparison</div>
+        <div className="flex gap-2 mb-3">
+          <input
+            value={abPrompt}
+            onChange={(e) => setAbPrompt(e.target.value)}
+            placeholder="Enter a prompt to compare across models..."
+            className="flex-1 bg-[var(--color-bg)] border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text)]"
+          />
+          <button
+            onClick={async () => {
+              if (!abPrompt) return;
+              setAbRunning(true);
+              try {
+                const result = await fetchJSON<any>('/api/ab-test', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ prompt: abPrompt }),
+                });
+                setAbResults(prev => [result, ...prev].slice(0, 10));
+              } catch {}
+              setAbRunning(false);
+            }}
+            disabled={abRunning}
+            className="px-4 py-2 bg-[var(--color-accent)] text-white rounded text-sm disabled:opacity-40"
+          >
+            {abRunning ? 'Running...' : 'Compare'}
+          </button>
+        </div>
+        {abResults.map((r: any, i: number) => (
+          <div key={i} className="bg-[var(--color-bg)] rounded-lg p-3 mb-2 text-xs">
+            <div className="flex gap-4 mb-2">
+              <span className="font-medium">{r.modelA}</span>
+              <span className="text-[var(--color-text2)]">vs</span>
+              <span className="font-medium">{r.modelB}</span>
+              <span className="ml-auto text-[var(--color-accent)]">Winner: {r.winner || 'tie'}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="text-[var(--color-text2)]">
+                <div className="text-[9px] uppercase mb-1">Model A ({r.latencyA_ms}ms, {r.tokensA}tok)</div>
+                <div className="truncate">{r.responseA?.slice(0, 100)}</div>
+              </div>
+              <div className="text-[var(--color-text2)]">
+                <div className="text-[9px] uppercase mb-1">Model B ({r.latencyB_ms}ms, {r.tokensB}tok)</div>
+                <div className="truncate">{r.responseB?.slice(0, 100)}</div>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

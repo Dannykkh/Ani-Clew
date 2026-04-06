@@ -185,8 +185,24 @@ func RunLoop(
 		// Normalize messages before API call
 		messages = NormalizeMessages(messages)
 
+		// RAG: search project for relevant context based on last user message
+		ragContext := ""
+		if i == 0 && len(messages) > 0 { // only on first iteration
+			lastUser := ""
+			for j := len(messages) - 1; j >= 0; j-- {
+				if messages[j].Role == "user" {
+					json.Unmarshal(messages[j].Content, &lastUser)
+					break
+				}
+			}
+			if lastUser != "" {
+				ragResults := RAGSearch(workDir, lastUser, 3)
+				ragContext = FormatRAGContext(ragResults)
+			}
+		}
+
 		// Build request with full context
-		sysPrompt := buildSystemPrompt(responseLang) + projectPrompt + projectCtx + skillText
+		sysPrompt := buildSystemPrompt(responseLang) + projectPrompt + projectCtx + skillText + ragContext
 		req := &types.MessagesRequest{
 			Model:    model,
 			System:   mustJSON([]map[string]string{{"type": "text", "text": sysPrompt}}),
