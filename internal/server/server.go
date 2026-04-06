@@ -883,8 +883,28 @@ func (s *Server) handleRegisterProvider(w http.ResponseWriter, r *http.Request) 
 		writeError(w, 400, "Invalid JSON")
 		return
 	}
-	if body.Name == "" || body.BaseURL == "" {
-		writeError(w, 400, "name and baseUrl required")
+	if body.Name == "" {
+		writeError(w, 400, "name required")
+		return
+	}
+
+	// API key update only (no baseUrl)
+	if body.BaseURL == "" && body.APIKey != "" {
+		cfg := config.Load()
+		if cfg.Providers == nil {
+			cfg.Providers = map[string]config.ProviderSettings{}
+		}
+		existing := cfg.Providers[body.Name]
+		existing.APIKey = body.APIKey
+		cfg.Providers[body.Name] = existing
+		config.Save(cfg)
+
+		writeJSON(w, map[string]any{"ok": true, "name": body.Name, "keySet": true})
+		return
+	}
+
+	if body.BaseURL == "" {
+		writeError(w, 400, "baseUrl required for custom provider")
 		return
 	}
 

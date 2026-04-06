@@ -11,6 +11,7 @@ export function SettingsPage() {
   const [skillSource, setSkillSource] = useState('all');
   const [saved, setSaved] = useState(false);
   const [mcpServers, setMcpServers] = useState<any[]>([]);
+  const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
 
   useEffect(() => {
     fetchJSON<ProviderInfo[]>('/api/providers').then(setProviders);
@@ -80,6 +81,47 @@ export function SettingsPage() {
           </div>
         </div>
 
+        {/* API Key input — shown for cloud providers */}
+        {selProvider && selProvider !== 'ollama' && (
+          <div className="mb-4">
+            <label className="block text-xs text-[var(--color-text2)] mb-1.5 uppercase">
+              API Key {selProvider === 'anthropic' ? '(or use CLI passthrough)' : ''}
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="password"
+                value={apiKeys[selProvider] || ''}
+                onChange={(e) => setApiKeys(prev => ({ ...prev, [selProvider]: e.target.value }))}
+                placeholder={`${selProvider.toUpperCase()}_API_KEY`}
+                className="flex-1 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg px-3 py-2.5 text-sm text-[var(--color-text)] font-mono"
+              />
+              <button
+                onClick={async () => {
+                  const key = apiKeys[selProvider];
+                  if (!key) return;
+                  await putJSON('/api/providers/register', {
+                    name: selProvider,
+                    apiKey: key,
+                  });
+                  setSaved(true);
+                  setTimeout(() => setSaved(false), 2000);
+                }}
+                className="px-4 py-2.5 bg-[var(--color-surface2)] text-[var(--color-text)] rounded-lg text-sm hover:bg-[var(--color-border)] transition-colors"
+              >
+                Save Key
+              </button>
+            </div>
+            <div className="text-[10px] text-[var(--color-text2)] mt-1">
+              {selProvider === 'anthropic' && 'Passthrough mode forwards CLI API keys. Only set this for direct web UI usage.'}
+              {selProvider === 'openai' && 'Set OPENAI_API_KEY env var or enter here for web UI usage.'}
+              {selProvider === 'gemini' && 'Set GEMINI_API_KEY env var or enter here for web UI usage.'}
+              {selProvider === 'groq' && 'Set GROQ_API_KEY env var or enter here.'}
+              {selProvider === 'zai' && 'Set XAI_API_KEY env var or enter here.'}
+              {selProvider === 'github-copilot' && 'Set GITHUB_TOKEN env var or enter here.'}
+            </div>
+          </div>
+        )}
+
         <button
           onClick={apply}
           className={`w-full py-2.5 rounded-lg text-sm font-medium transition-colors ${
@@ -88,6 +130,33 @@ export function SettingsPage() {
         >
           {saved ? t('settings.applied') : t('settings.apply')}
         </button>
+      </div>
+
+      {/* CLI Connections */}
+      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-6 mb-4">
+        <h2 className="text-sm font-semibold mb-4 text-[var(--color-text2)] uppercase tracking-wide">CLI Connections</h2>
+        <div className="space-y-4">
+          {[
+            { name: 'Claude CLI', env: 'ANTHROPIC_BASE_URL', cmd: 'claude', color: 'text-orange-400' },
+            { name: 'Codex CLI', env: 'OPENAI_BASE_URL', cmd: 'codex', color: 'text-green-400' },
+            { name: 'Gemini CLI', env: 'GEMINI_BASE_URL', cmd: 'gemini', color: 'text-blue-400' },
+          ].map((cli) => (
+            <div key={cli.name} className="bg-[var(--color-bg)] rounded-lg p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className={`text-sm font-semibold ${cli.color}`}>{cli.name}</span>
+              </div>
+              <div className="font-mono text-xs text-[var(--color-text2)] bg-[var(--color-surface2)] rounded px-3 py-2 select-all cursor-pointer"
+                   onClick={(e) => { navigator.clipboard.writeText(`${cli.env}=http://localhost:${config ? '4000' : '4000'} ${cli.cmd}`); const el = e.currentTarget; el.style.borderColor = 'var(--color-green)'; setTimeout(() => el.style.borderColor = '', 1000); }}
+                   title="Click to copy"
+              >
+                {cli.env}=http://localhost:4000 {cli.cmd}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 text-[10px] text-[var(--color-text2)]">
+          Click a command to copy. CLI tools send their own API keys through AniClew transparently.
+        </div>
       </div>
 
       {/* Toggles */}
