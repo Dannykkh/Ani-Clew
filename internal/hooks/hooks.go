@@ -71,6 +71,18 @@ func (r *Registry) Load(workDir string, skillSource string) {
 	}
 }
 
+// ExecuteAsync runs hooks in background (non-blocking). Results are logged but not returned.
+func (r *Registry) ExecuteAsync(hookType HookType, env map[string]string) {
+	go func() {
+		results := r.Execute(hookType, env)
+		for _, result := range results {
+			if result.Error != "" {
+				log.Printf("[Hooks async] %s error: %s", hookType, result.Error)
+			}
+		}
+	}()
+}
+
 // Execute runs all hooks of the given type and returns results.
 func (r *Registry) Execute(hookType HookType, env map[string]string) []HookResult {
 	var results []HookResult

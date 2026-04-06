@@ -55,6 +55,16 @@ func TestValidateBashSecurity(t *testing.T) {
 
 		// Brace expansion with paths
 		{"brace paths blocked", "cat {/etc/passwd,/etc/shadow}", true, "brace-expansion"},
+
+		// New validators
+		{"carriage return blocked", "echo hello\rmalicious", true, "carriage-return"},
+		{"git credential blocked", "git credential fill", true, "git-credential"},
+		{"proc environ blocked", "cat /proc/self/environ", true, "proc-access"},
+		{"base64 exec blocked", "echo payload | base64 -d | bash", true, "dangerous-commands"},
+		{"base64 decode pipe", "base64 --decode secret.txt | python", true, "base64-decode-exec"},
+		{"history clear blocked", "history -c", true, "history-manipulation"},
+		{"unset HISTFILE blocked", "unset HISTFILE", true, "history-manipulation"},
+		{"crontab edit blocked", "crontab -e", true, "crontab-modification"},
 	}
 
 	for _, tt := range tests {

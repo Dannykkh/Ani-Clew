@@ -53,6 +53,12 @@ const (
 
 // ClassifyHTTPError determines the error category from status code and headers.
 func ClassifyHTTPError(statusCode int, headers http.Header) ErrorCategory {
+	// x-should-retry header takes precedence
+	if headers != nil {
+		if shouldRetry := headers.Get("x-should-retry"); shouldRetry == "false" {
+			return ErrorFatal // server explicitly says don't retry
+		}
+	}
 	switch {
 	case statusCode == 429:
 		return ErrorRateLimit

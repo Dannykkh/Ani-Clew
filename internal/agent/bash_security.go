@@ -38,6 +38,14 @@ func ValidateBashSecurity(command string, workDir string) *SecurityCheckResult {
 		{"env-var-hijack", checkEnvVarHijack},
 		{"backslash-escape", checkBackslashEscape},
 		{"redirect-to-system", checkRedirectToSystem},
+		{"carriage-return", checkCarriageReturn},
+		{"null-byte", checkNullByte},
+		{"git-credential", checkGitCredential},
+		{"proc-access", checkProcAccess},
+		{"python-subprocess", checkPythonSubprocess},
+		{"base64-decode-exec", checkBase64DecodeExec},
+		{"history-manipulation", checkHistoryManipulation},
+		{"crontab-modification", checkCrontabModification},
 	}
 
 	for _, v := range validators {
@@ -262,6 +270,84 @@ func checkRedirectToSystem(cmd, _ string) *SecurityCheckResult {
 		if matched, _ := regexp.MatchString(pattern, cmd); matched {
 			return &SecurityCheckResult{Blocked: true, Reason: fmt.Sprintf("Output redirect to system path %s detected", sp)}
 		}
+	}
+	return nil
+}
+
+// checkCarriageReturn detects \r used to hide commands in terminal output
+func checkCarriageReturn(cmd, _ string) *SecurityCheckResult {
+	if strings.Contains(cmd, "\r") {
+		return &SecurityCheckResult{Blocked: true, Reason: "Carriage return detected (can hide commands in terminal)"}
+	}
+	return nil
+}
+
+// checkNullByte detects null bytes that can truncate strings in C-based tools
+func checkNullByte(cmd, _ string) *SecurityCheckResult {
+	if strings.Contains(cmd, "\x00") {
+		return &SecurityCheckResult{Blocked: true, Reason: "Null byte detected"}
+	}
+	return nil
+}
+
+// checkGitCredential detects git credential theft attempts
+func checkGitCredential(cmd, _ string) *SecurityCheckResult {
+	if regexp.MustCompile(`git\s+credential\s+fill`).MatchString(cmd) {
+		return &SecurityCheckResult{Blocked: true, Reason: "git credential fill detected (can exfiltrate credentials)"}
+	}
+	return nil
+}
+
+// checkProcAccess detects /proc filesystem access that can leak secrets
+func checkProcAccess(cmd, _ string) *SecurityCheckResult {
+	if regexp.MustCompile(`/proc/self/environ`).MatchString(cmd) ||
+		regexp.MustCompile(`/proc/\d+/environ`).MatchString(cmd) ||
+		regexp.MustCompile(`/proc/self/cmdline`).MatchString(cmd) {
+		return &SecurityCheckResult{Blocked: true, Reason: "/proc access can leak environment variables and secrets"}
+	}
+	return nil
+}
+
+// checkPythonSubprocess detects Python/Ruby inline code execution with shell access
+func checkPythonSubprocess(cmd, _ string) *SecurityCheckResult {
+	if regexp.MustCompile(`python3?\s+-c\s+.*(?:__import__|exec|eval|compile)\s*\(`).MatchString(cmd) {
+		return &SecurityCheckResult{Blocked: true, Reason: "Python inline code with dangerous builtins"}
+	}
+	if regexp.MustCompile(`ruby\s+-e\s+.*(?:system|exec|`+"`"+`)`).MatchString(cmd) {
+		return &SecurityCheckResult{Blocked: true, Reason: "Ruby inline code with shell execution"}
+	}
+	return nil
+}
+
+// checkBase64DecodeExec detects base64 obfuscation to hide malicious commands
+func checkBase64DecodeExec(cmd, _ string) *SecurityCheckResult {
+	if regexp.MustCompile(`base64\s+(-d|--decode).*\|\s*(bash|sh|zsh|python|perl)`).MatchString(cmd) {
+		return &SecurityCheckResult{Blocked: true, Reason: "Base64 decode piped to shell execution"}
+	}
+	if regexp.MustCompile(`echo\s+\S+\s*\|\s*base64\s+(-d|--decode)\s*\|\s*(bash|sh)`).MatchString(cmd) {
+		return &SecurityCheckResult{Blocked: true, Reason: "Encoded payload piped to shell"}
+	}
+	return nil
+}
+
+// checkHistoryManipulation detects attempts to hide commands from shell history
+func checkHistoryManipulation(cmd, _ string) *SecurityCheckResult {
+	if regexp.MustCompile(`(?:^|\s)history\s+-[cdw]`).MatchString(cmd) {
+		return &SecurityCheckResult{Blocked: true, Reason: "Shell history manipulation detected"}
+	}
+	if regexp.MustCompile(`HISTFILE=/dev/null`).MatchString(cmd) || regexp.MustCompile(`unset\s+HISTFILE`).MatchString(cmd) {
+		return &SecurityCheckResult{Blocked: true, Reason: "History file suppression detected"}
+	}
+	return nil
+}
+
+// checkCrontabModification detects crontab edits that can establish persistence
+func checkCrontabModification(cmd, _ string) *SecurityCheckResult {
+	if regexp.MustCompile(`crontab\s+-[erl]`).MatchString(cmd) {
+		return &SecurityCheckResult{Blocked: true, Reason: "Crontab modification detected"}
+	}
+	if strings.Contains(cmd, "/etc/cron") && regexp.MustCompile(`(>|>>|tee|cp|mv)`).MatchString(cmd) {
+		return &SecurityCheckResult{Blocked: true, Reason: "Cron directory modification detected"}
 	}
 	return nil
 }

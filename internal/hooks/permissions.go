@@ -17,9 +17,10 @@ type PermissionRule struct {
 
 // PermissionSnapshot is an immutable set of rules captured at session start.
 type PermissionSnapshot struct {
-	AllowRules []PermissionRule `json:"allowRules"`
-	DenyRules  []PermissionRule `json:"denyRules"`
-	Mode       string           `json:"mode"` // "default", "bypassPermissions", "dontAsk", "acceptEdits"
+	AllowRules    []PermissionRule   `json:"allowRules"`
+	DenyRules     []PermissionRule   `json:"denyRules"`
+	Mode          string             `json:"mode"` // "default", "bypassPermissions", "dontAsk", "acceptEdits"
+	DenialCounts  map[string]int     `json:"-"`     // tool → consecutive denial count (runtime only)
 }
 
 // PersistAllowRule saves an "always allow" decision for future sessions.
@@ -80,6 +81,28 @@ func PersistDenyRule(workDir string, tool string, pattern string) error {
 
 	out, _ := json.MarshalIndent(settings, "", "  ")
 	return os.WriteFile(path, out, 0644)
+}
+
+// TrackDenial records a tool denial. After 3 consecutive denials, auto-persists deny rule.
+func (ps *PermissionSnapshot) TrackDenial(toolName string, workDir string) int {
+	if ps.DenialCounts == nil {
+		ps.DenialCounts = make(map[string]int)
+	}
+	ps.DenialCounts[toolName]++
+	count := ps.DenialCounts[toolName]
+
+	// After 3 consecutive denials, auto-persist deny rule
+	if count >= 3 {
+		PersistDenyRule(workDir, toolName, "")
+	}
+	return count
+}
+
+// ResetDenial clears the denial counter for a tool (called on successful allow).
+func (ps *PermissionSnapshot) ResetDenial(toolName string) {
+	if ps.DenialCounts != nil {
+		delete(ps.DenialCounts, toolName)
+	}
 }
 
 // Decide returns "allow", "deny", or "ask" for a tool+input combination.

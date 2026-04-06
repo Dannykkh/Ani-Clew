@@ -1,5 +1,7 @@
 package api
 
+import "encoding/json"
+
 // ModelPricing holds per-million-token pricing.
 type ModelPricing struct {
 	InputPerMillion       float64 // $/M input tokens
@@ -69,7 +71,23 @@ func CalculateCost(model string, usage TokenUsage) float64 {
 	return cost
 }
 
-// EstimateInputTokens roughly estimates token count from text length.
+// EstimateInputTokens estimates token count from text length.
+// Uses different ratios based on content type.
 func EstimateInputTokens(textLength int) int {
-	return textLength / 4 // ~4 chars per token average
+	// Average ~3.5 chars per token for English text
+	// ~2.5 chars per token for code (more symbols/keywords)
+	// Use 3.2 as balanced estimate
+	return int(float64(textLength) / 3.2)
+}
+
+// EstimateTokensFromMessages estimates tokens for a message array.
+func EstimateTokensFromMessages(messages interface{}) int {
+	// JSON marshal and estimate from length
+	data, err := json.Marshal(messages)
+	if err != nil {
+		return 0
+	}
+	// JSON overhead: ~30% of content is structure (keys, brackets)
+	contentLen := int(float64(len(data)) * 0.7)
+	return EstimateInputTokens(contentLen)
 }

@@ -369,19 +369,43 @@ Description: %s
 
 // ── Verification Loop ──
 
-// Verify runs a verification command and returns pass/fail with details.
+// Verify runs the verification command with retry loop (up to maxRetries).
 func (t *Team) Verify(ctx context.Context) (bool, string) {
 	if t.config.VerifyCommand == "" {
 		return true, "No verification command configured"
 	}
 
+	maxRetries := 3
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if ctx.Err() != nil {
+			return false, "Verification cancelled"
+		}
+
+		t.report(fmt.Sprintf("Verification attempt %d/%d: %s", attempt, maxRetries, t.config.VerifyCommand))
+
+		input, _ := json.Marshal(map[string]string{"command": t.config.VerifyCommand})
+		result := ExecuteBashDeep(input, t.workDir, nil)
+
+		if !result.IsError {
+			return true, fmt.Sprintf("Verification PASSED (attempt %d):\n%s", attempt, truncateStr(result.Output, 500))
+		}
+
+		t.report(fmt.Sprintf("Verification attempt %d FAILED: %s", attempt, truncateStr(result.Output, 200)))
+
+		if attempt < maxRetries {
+			// Give a chance for fixes before retrying
+			t.report("Waiting before retry...")
+			select {
+			case <-ctx.Done():
+				return false, "Cancelled during retry wait"
+			case <-time.After(2 * time.Second):
+			}
+		}
+	}
+
 	input, _ := json.Marshal(map[string]string{"command": t.config.VerifyCommand})
 	result := ExecuteBashDeep(input, t.workDir, nil)
-
-	if result.IsError {
-		return false, fmt.Sprintf("Verification FAILED:\n%s", truncateStr(result.Output, 2000))
-	}
-	return true, fmt.Sprintf("Verification PASSED:\n%s", truncateStr(result.Output, 500))
+	return false, fmt.Sprintf("Verification FAILED after %d attempts:\n%s", maxRetries, truncateStr(result.Output, 2000))
 }
 
 // ── Team Cleanup ──

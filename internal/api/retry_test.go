@@ -157,6 +157,17 @@ func TestWithRetry_EventualSuccess(t *testing.T) {
 	}
 }
 
+func TestClassifyHTTPError_XShouldRetry(t *testing.T) {
+	headers := http.Header{}
+	headers.Set("x-should-retry", "false")
+
+	// Even a 500 should be fatal if x-should-retry: false
+	result := ClassifyHTTPError(500, headers)
+	if result != ErrorFatal {
+		t.Errorf("x-should-retry: false should make 500 fatal, got %v", result)
+	}
+}
+
 func TestExtractErrorMessage(t *testing.T) {
 	tests := []struct {
 		body     string
