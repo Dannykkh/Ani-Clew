@@ -308,9 +308,22 @@ export function SidePanel({ visible, mode, onFileClick, onSessionClick, onNewCha
                 <div
                   key={s.id}
                   onClick={() => onSessionClick?.(s.id)}
-                  className="px-3 py-2 cursor-pointer hover:bg-[var(--color-surface2)] transition-colors"
+                  className="px-3 py-2 cursor-pointer hover:bg-[var(--color-surface2)] transition-colors group"
                 >
-                  <div className="text-xs font-medium truncate">{s.title}</div>
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs font-medium truncate flex-1">{s.title}</div>
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        await fetchJSON(`/api/sessions/${s.id}`, { method: 'DELETE' });
+                        loadSessions();
+                      }}
+                      className="text-[10px] text-[var(--color-text2)] hover:text-[var(--color-red)] opacity-0 group-hover:opacity-100 transition-opacity ml-1 shrink-0"
+                      title={ko ? '삭제' : 'Delete'}
+                    >
+                      ✕
+                    </button>
+                  </div>
                   <div className="text-[10px] text-[var(--color-text2)] truncate">{s.preview}</div>
                   <div className="text-[9px] text-[var(--color-text2)] mt-0.5">{s.turns} {ko ? '턴' : 'turns'} · {s.model}</div>
                 </div>

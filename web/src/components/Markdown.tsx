@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 function ThinkingBlock({ content }: { content: string }) {
   const [open, setOpen] = useState(false);
@@ -75,10 +77,16 @@ function MarkdownContent({ content }: { content: string }) {
               </code>
             );
           }
+          const lang = className?.replace('language-', '') || '';
+          const code = String(children).replace(/\n$/, '');
           return (
-            <code className={`block bg-[var(--color-bg)] p-3 rounded-lg text-[13px] font-mono overflow-x-auto my-2 leading-relaxed ${className || ''}`} {...props}>
-              {children}
-            </code>
+            <SyntaxHighlighter
+              style={oneDark}
+              language={lang}
+              customStyle={{ margin: '8px 0', borderRadius: '8px', fontSize: '13px', lineHeight: '1.5' }}
+            >
+              {code}
+            </SyntaxHighlighter>
           );
         },
         pre({ children }) {

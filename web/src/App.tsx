@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ActivityBar } from './components/ActivityBar';
 import { SidePanel } from './components/SidePanel';
+import { Toast, useToast } from './components/Toast';
 import { ChatPage } from './pages/Chat';
 import { RoutesPage } from './pages/Routes';
 import { CostsPage } from './pages/Costs';
@@ -32,6 +33,7 @@ function App() {
   const [viewingFile, setViewingFile] = useState<{ path: string; content: string } | null>(null);
 
   const activeProject = projects.find(p => p.active);
+  const { toast, dismissToast } = useToast();
 
   const loadProjects = useCallback(async () => {
     try {
@@ -71,6 +73,9 @@ function App() {
 
   return (
     <div className="flex h-screen w-full">
+      {/* Toast notifications */}
+      {toast && <Toast message={toast.message} type={toast.type} onDismiss={dismissToast} />}
+
       {/* Activity Bar (always visible) */}
       <ActivityBar
         active={page}
