@@ -4,14 +4,13 @@ import { t } from '../lib/i18n';
 
 export function SettingsPage() {
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
-  const [config, setConfig] = useState<{ provider: string; model: string; routerEnabled: boolean } | null>(null);
+  const [config, setConfig] = useState<any>(null);
   const [selProvider, setSelProvider] = useState('');
   const [selModel, setSelModel] = useState('');
-  const [responseLang, setResponseLang] = useState('auto');
-  const [skillSource, setSkillSource] = useState('all');
+  const [apiKey, setApiKey] = useState('');
   const [saved, setSaved] = useState(false);
-  const [mcpServers, setMcpServers] = useState<any[]>([]);
-  const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [responseLang, setResponseLang] = useState('auto');
 
   useEffect(() => {
     fetchJSON<ProviderInfo[]>('/api/providers').then(setProviders);
@@ -21,271 +20,204 @@ export function SettingsPage() {
       setSelModel(c.model);
       setResponseLang(c.responseLang || 'auto');
     });
-    fetchJSON<any>('/api/mcp').then(data => setMcpServers(Array.isArray(data) ? data : (data?.servers || []))).catch(() => setMcpServers([]));
   }, []);
 
   const models = providers.find((p) => p.name === selProvider)?.models || [];
+  const isCloud = selProvider && selProvider !== 'ollama';
 
-  async function apply() {
-    await putJSON('/api/config', { provider: selProvider, model: selModel });
-    setConfig((c) => c ? { ...c, provider: selProvider, model: selModel } : c);
+  async function quickStart(provider: string, model: string) {
+    await putJSON('/api/config', { provider, model });
+    setConfig((c: any) => c ? { ...c, provider, model } : c);
+    setSelProvider(provider);
+    setSelModel(model);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }
 
-  async function toggleRouter() {
-    const next = !config?.routerEnabled;
-    await putJSON('/api/config', { routerEnabled: next });
-    setConfig((c) => c ? { ...c, routerEnabled: next } : c);
+  async function applyWithKey() {
+    if (apiKey) {
+      await fetchJSON('/api/providers/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: selProvider, apiKey }),
+      });
+    }
+    await putJSON('/api/config', { provider: selProvider, model: selModel });
+    setConfig((c: any) => c ? { ...c, provider: selProvider, model: selModel } : c);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
   }
 
   return (
     <div className="p-6 w-full overflow-y-auto h-full">
-      <h1 className="text-xl font-semibold mb-6">{t('settings.title')}</h1>
 
-      {/* Provider & Model */}
-      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-6 mb-4">
-        <h2 className="text-sm font-semibold mb-4 text-[var(--color-text2)] uppercase tracking-wide">{t('settings.defaultProvider')}</h2>
-
-        {config && (
-          <div className="text-xs text-[var(--color-text2)] mb-4 px-3 py-2 bg-[var(--color-bg)] rounded-lg">
-            Current: <span className="text-[var(--color-green)] font-medium">{config.provider} / {config.model}</span>
-          </div>
-        )}
-
-        <div className="grid grid-cols-2 gap-4 mb-4">
+      {/* Current Status */}
+      {config && (
+        <div className="mb-6 px-4 py-3 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl flex items-center gap-3">
+          <div className="w-2.5 h-2.5 rounded-full bg-[var(--color-green)]" />
           <div>
-            <label className="block text-xs text-[var(--color-text2)] mb-1.5 uppercase">Provider</label>
-            <select
-              value={selProvider}
-              onChange={(e) => { setSelProvider(e.target.value); setSelModel(''); }}
-              className="w-full bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg px-3 py-2.5 text-sm text-[var(--color-text)]"
-            >
-              {providers.map((p) => (
-                <option key={p.name} value={p.name}>{p.displayName}</option>
-              ))}
-            </select>
+            <div className="text-sm font-semibold">{config.provider} / {config.model}</div>
+            <div className="text-[10px] text-[var(--color-text2)]">{t('settings.title')}</div>
           </div>
-          <div>
-            <label className="block text-xs text-[var(--color-text2)] mb-1.5 uppercase">Model</label>
+          {saved && <span className="ml-auto text-xs text-[var(--color-green)]">Saved!</span>}
+        </div>
+      )}
+
+      {/* Quick Start — One Click */}
+      <div className="mb-6">
+        <h2 className="text-lg font-semibold mb-3">Quick Start</h2>
+        <div className="grid grid-cols-3 gap-3">
+          <button
+            onClick={() => quickStart('ollama', 'qwen3:14b')}
+            className={`p-4 rounded-xl border text-left transition-all hover:border-[var(--color-accent)] ${config?.provider === 'ollama' ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10' : 'border-[var(--color-border)] bg-[var(--color-surface)]'}`}
+          >
+            <div className="text-2xl mb-2">🏠</div>
+            <div className="text-sm font-semibold">Local (Ollama)</div>
+            <div className="text-[10px] text-[var(--color-text2)] mt-1">Free, private, no API key</div>
+            <div className="text-[9px] text-[var(--color-accent)] mt-2">qwen3:14b</div>
+          </button>
+
+          <button
+            onClick={() => { setSelProvider('openai'); setSelModel('gpt-4o-mini'); setShowAdvanced(false); }}
+            className={`p-4 rounded-xl border text-left transition-all hover:border-[var(--color-accent)] ${config?.provider === 'openai' ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10' : 'border-[var(--color-border)] bg-[var(--color-surface)]'}`}
+          >
+            <div className="text-2xl mb-2">🟢</div>
+            <div className="text-sm font-semibold">OpenAI</div>
+            <div className="text-[10px] text-[var(--color-text2)] mt-1">API key needed</div>
+            <div className="text-[9px] text-[var(--color-accent)] mt-2">GPT-4o / o4</div>
+          </button>
+
+          <button
+            onClick={() => { setSelProvider('anthropic'); setSelModel('claude-sonnet-4-6-20250217'); setShowAdvanced(false); }}
+            className={`p-4 rounded-xl border text-left transition-all hover:border-[var(--color-accent)] ${config?.provider === 'anthropic' ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10' : 'border-[var(--color-border)] bg-[var(--color-surface)]'}`}
+          >
+            <div className="text-2xl mb-2">🟠</div>
+            <div className="text-sm font-semibold">Anthropic</div>
+            <div className="text-[10px] text-[var(--color-text2)] mt-1">API key needed</div>
+            <div className="text-[9px] text-[var(--color-accent)] mt-2">Claude Sonnet/Opus</div>
+          </button>
+        </div>
+      </div>
+
+      {/* API Key + Model Selection (shown when cloud provider selected) */}
+      {isCloud && (
+        <div className="mb-6 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-5">
+          <h3 className="text-sm font-semibold mb-3">{selProvider} Setup</h3>
+
+          <div className="mb-3">
+            <label className="block text-xs text-[var(--color-text2)] mb-1">API Key</label>
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder={`Enter your ${selProvider} API key`}
+              className="w-full bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg px-3 py-2.5 text-sm text-[var(--color-text)] font-mono"
+            />
+          </div>
+
+          <div className="mb-4">
+            <label className="block text-xs text-[var(--color-text2)] mb-1">Model</label>
             <select
               value={selModel}
               onChange={(e) => setSelModel(e.target.value)}
               className="w-full bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg px-3 py-2.5 text-sm text-[var(--color-text)]"
             >
-              <option value="">Select...</option>
+              <option value="">Select model...</option>
               {models.map((m) => (
-                <option key={m.id} value={m.id}>{m.displayName} ({m.id})</option>
+                <option key={m.id} value={m.id}>{m.displayName}</option>
               ))}
             </select>
           </div>
+
+          <button
+            onClick={applyWithKey}
+            disabled={!selModel}
+            className="w-full py-2.5 bg-[var(--color-accent)] text-white rounded-lg text-sm font-medium disabled:opacity-40 hover:opacity-90"
+          >
+            Start with {selProvider}
+          </button>
         </div>
+      )}
 
-        {/* API Key input — shown for cloud providers */}
-        {selProvider && selProvider !== 'ollama' && (
-          <div className="mb-4">
-            <label className="block text-xs text-[var(--color-text2)] mb-1.5 uppercase">
-              API Key {selProvider === 'anthropic' ? '(or use CLI passthrough)' : ''}
-            </label>
-            <div className="flex gap-2">
-              <input
-                type="password"
-                value={apiKeys[selProvider] || ''}
-                onChange={(e) => setApiKeys(prev => ({ ...prev, [selProvider]: e.target.value }))}
-                placeholder={`${selProvider.toUpperCase()}_API_KEY`}
-                className="flex-1 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg px-3 py-2.5 text-sm text-[var(--color-text)] font-mono"
-              />
-              <button
-                onClick={async () => {
-                  const key = apiKeys[selProvider];
-                  if (!key) return;
-                  await putJSON('/api/providers/register', {
-                    name: selProvider,
-                    apiKey: key,
-                  });
-                  setSaved(true);
-                  setTimeout(() => setSaved(false), 2000);
-                }}
-                className="px-4 py-2.5 bg-[var(--color-surface2)] text-[var(--color-text)] rounded-lg text-sm hover:bg-[var(--color-border)] transition-colors"
-              >
-                Save Key
-              </button>
-            </div>
-            <div className="text-[10px] text-[var(--color-text2)] mt-1">
-              {selProvider === 'anthropic' && 'Passthrough mode forwards CLI API keys. Only set this for direct web UI usage.'}
-              {selProvider === 'openai' && 'Set OPENAI_API_KEY env var or enter here for web UI usage.'}
-              {selProvider === 'gemini' && 'Set GEMINI_API_KEY env var or enter here for web UI usage.'}
-              {selProvider === 'groq' && 'Set GROQ_API_KEY env var or enter here.'}
-              {selProvider === 'zai' && 'Set XAI_API_KEY env var or enter here.'}
-              {selProvider === 'github-copilot' && 'Set GITHUB_TOKEN env var or enter here.'}
-            </div>
-          </div>
-        )}
-
-        <button
-          onClick={apply}
-          className={`w-full py-2.5 rounded-lg text-sm font-medium transition-colors ${
-            saved ? 'bg-[var(--color-green)] text-white' : 'bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent2)]'
-          }`}
-        >
-          {saved ? t('settings.applied') : t('settings.apply')}
-        </button>
-      </div>
-
-      {/* CLI Connections */}
-      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-6 mb-4">
-        <h2 className="text-sm font-semibold mb-4 text-[var(--color-text2)] uppercase tracking-wide">CLI Connections</h2>
-        <div className="space-y-4">
+      {/* Language */}
+      <div className="mb-6 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-5">
+        <h3 className="text-sm font-semibold mb-3">{t('settings.language')}</h3>
+        <div className="flex gap-2 flex-wrap">
           {[
-            { name: 'Claude CLI', env: 'ANTHROPIC_BASE_URL', cmd: 'claude', color: 'text-orange-400' },
-            { name: 'Codex CLI', env: 'OPENAI_BASE_URL', cmd: 'codex', color: 'text-green-400' },
-            { name: 'Gemini CLI', env: 'GEMINI_BASE_URL', cmd: 'gemini', color: 'text-blue-400' },
-          ].map((cli) => (
-            <div key={cli.name} className="bg-[var(--color-bg)] rounded-lg p-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className={`text-sm font-semibold ${cli.color}`}>{cli.name}</span>
-              </div>
-              <div className="font-mono text-xs text-[var(--color-text2)] bg-[var(--color-surface2)] rounded px-3 py-2 select-all cursor-pointer"
-                   onClick={(e) => { navigator.clipboard.writeText(`${cli.env}=http://localhost:${config ? '4000' : '4000'} ${cli.cmd}`); const el = e.currentTarget; el.style.borderColor = 'var(--color-green)'; setTimeout(() => el.style.borderColor = '', 1000); }}
-                   title="Click to copy"
-              >
-                {cli.env}=http://localhost:4000 {cli.cmd}
-              </div>
-            </div>
+            { id: 'auto', label: '🌐 Auto' },
+            { id: 'ko', label: '🇰🇷 한국어' },
+            { id: 'en', label: '🇺🇸 English' },
+            { id: 'ja', label: '🇯🇵 日本語' },
+            { id: 'zh', label: '🇨🇳 中文' },
+          ].map((lang) => (
+            <button
+              key={lang.id}
+              onClick={async () => {
+                setResponseLang(lang.id);
+                await putJSON('/api/config', { responseLang: lang.id });
+              }}
+              className={`px-4 py-2 rounded-lg text-sm ${
+                responseLang === lang.id
+                  ? 'bg-[var(--color-accent)] text-white'
+                  : 'bg-[var(--color-surface2)] text-[var(--color-text2)] hover:text-[var(--color-text)]'
+              }`}
+            >
+              {lang.label}
+            </button>
           ))}
         </div>
-        <div className="mt-3 text-[10px] text-[var(--color-text2)]">
-          Click a command to copy. CLI tools send their own API keys through AniClew transparently.
-        </div>
       </div>
 
-      {/* Toggles */}
-      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-6">
-        <h2 className="text-sm font-semibold mb-4 text-[var(--color-text2)] uppercase tracking-wide">{t('settings.options')}</h2>
+      {/* Advanced Settings (collapsed) */}
+      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl">
+        <button
+          onClick={() => setShowAdvanced(!showAdvanced)}
+          className="w-full px-5 py-3 text-left flex items-center justify-between text-sm"
+        >
+          <span className="font-medium text-[var(--color-text2)]">Advanced Settings</span>
+          <span className="text-[var(--color-text2)]">{showAdvanced ? '▴' : '▾'}</span>
+        </button>
 
-        <div className="flex items-center justify-between py-3 border-b border-[var(--color-border)]">
-          <div>
-            <div className="text-sm font-medium">{t('settings.smartRouter')}</div>
-            <div className="text-xs text-[var(--color-text2)]">{t('settings.smartRouterDesc')}</div>
-          </div>
-          <button
-            onClick={toggleRouter}
-            className={`w-11 h-6 rounded-full transition-colors relative ${
-              config?.routerEnabled ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-surface2)]'
-            }`}
-          >
-            <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-transform ${
-              config?.routerEnabled ? 'translate-x-6' : 'translate-x-1'
-            }`} />
-          </button>
-        </div>
+        {showAdvanced && (
+          <div className="px-5 pb-5 border-t border-[var(--color-border)] pt-4 space-y-4">
+            {/* Provider/Model manual select */}
+            <div>
+              <label className="block text-xs text-[var(--color-text2)] mb-1">Provider</label>
+              <select value={selProvider} onChange={(e) => { setSelProvider(e.target.value); setSelModel(''); }}
+                className="w-full bg-[var(--color-bg)] border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text)]">
+                {providers.map(p => <option key={p.name} value={p.name}>{p.displayName}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-[var(--color-text2)] mb-1">Model</label>
+              <select value={selModel} onChange={(e) => setSelModel(e.target.value)}
+                className="w-full bg-[var(--color-bg)] border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text)]">
+                <option value="">Select...</option>
+                {models.map(m => <option key={m.id} value={m.id}>{m.displayName} ({m.id})</option>)}
+              </select>
+            </div>
 
-        <div className="flex items-center justify-between py-3 border-b border-[var(--color-border)]">
-          <div>
-            <div className="text-sm font-medium">{t('settings.authPass')}</div>
-            <div className="text-xs text-[var(--color-text2)]">{t('settings.authPassDesc')}</div>
-          </div>
-          <div className="w-11 h-6 rounded-full bg-[var(--color-accent)] relative">
-            <div className="w-4 h-4 bg-white rounded-full absolute top-1 translate-x-6" />
-          </div>
-        </div>
-
-        {/* Response Language */}
-        <div className="py-3">
-          <div className="text-sm font-medium mb-2">{t('settings.language')}</div>
-          <div className="text-xs text-[var(--color-text2)] mb-3">AI 응답 언어 / AI response language</div>
-          <div className="flex gap-2 flex-wrap">
-            {[
-              { id: 'auto', label: '🌐 Auto (자동감지)', desc: 'Follow user language' },
-              { id: 'ko', label: '🇰🇷 한국어', desc: 'Korean' },
-              { id: 'en', label: '🇺🇸 English', desc: 'English' },
-              { id: 'ja', label: '🇯🇵 日本語', desc: 'Japanese' },
-              { id: 'zh', label: '🇨🇳 中文', desc: 'Chinese' },
-            ].map((lang) => (
-              <button
-                key={lang.id}
-                onClick={async () => {
-                  setResponseLang(lang.id);
-                  await putJSON('/api/config', { responseLang: lang.id });
-                }}
-                className={`px-4 py-2 rounded-lg text-sm transition-colors ${
-                  responseLang === lang.id
-                    ? 'bg-[var(--color-accent)] text-white'
-                    : 'bg-[var(--color-surface2)] text-[var(--color-text2)] hover:text-[var(--color-text)]'
-                }`}
-              >
-                {lang.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Skill Source */}
-        <div className="py-3 border-t border-[var(--color-border)]">
-          <div className="text-sm font-medium mb-2">Skill Source</div>
-          <div className="text-xs text-[var(--color-text2)] mb-3">스킬을 어디서 가져올지 / Where to load skills from</div>
-          <div className="flex gap-2 flex-wrap">
-            {[
-              { id: 'all', label: 'All (전체)' },
-              { id: 'claude', label: 'Claude CLI' },
-              { id: 'codex', label: 'Codex CLI' },
-              { id: 'gemini', label: 'Gemini CLI' },
-              { id: 'none', label: 'None (없음)' },
-            ].map((src) => (
-              <button
-                key={src.id}
-                onClick={async () => {
-                  setSkillSource(src.id);
-                  await putJSON('/api/skill-source', { source: src.id });
-                }}
-                className={`px-4 py-2 rounded-lg text-sm transition-colors ${
-                  skillSource === src.id
-                    ? 'bg-[var(--color-accent)] text-white'
-                    : 'bg-[var(--color-surface2)] text-[var(--color-text2)] hover:text-[var(--color-text)]'
-                }`}
-              >
-                {src.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* MCP Servers */}
-      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-6 mt-4">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-[var(--color-text2)] uppercase tracking-wide">MCP Servers</h2>
-          <button
-            onClick={async () => {
-              await fetchJSON('/api/mcp/connect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
-              const data = await fetchJSON<any[]>('/api/mcp');
-              setMcpServers(data);
-            }}
-            className="text-xs px-3 py-1.5 bg-[var(--color-accent)] text-white rounded-lg hover:opacity-80"
-          >
-            Reconnect
-          </button>
-        </div>
-        {mcpServers.length === 0 ? (
-          <div className="text-xs text-[var(--color-text2)]">
-            No MCP servers configured. Add servers in <code className="bg-[var(--color-bg)] px-1 rounded">.mcp.json</code> or <code className="bg-[var(--color-bg)] px-1 rounded">.claude/settings.json</code>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {mcpServers.map((srv: any, i: number) => (
-              <div key={i} className="flex items-center justify-between bg-[var(--color-bg)] rounded-lg px-3 py-2">
-                <div>
-                  <div className="text-sm font-medium">{srv.name || `Server ${i + 1}`}</div>
-                  <div className="text-[10px] text-[var(--color-text2)]">{srv.command || srv.url || '—'}</div>
+            {/* CLI Connection */}
+            <div>
+              <div className="text-xs text-[var(--color-text2)] uppercase mb-2">CLI Connection (optional)</div>
+              <div className="text-[10px] text-[var(--color-text2)] mb-2">CLI tools have their own login. These commands route them through AniClew for monitoring.</div>
+              {['Claude CLI: ANTHROPIC_BASE_URL=http://localhost:4000 claude',
+                'Codex CLI: OPENAI_BASE_URL=http://localhost:4000 codex',
+                'Gemini CLI: GEMINI_BASE_URL=http://localhost:4000 gemini',
+              ].map(cmd => (
+                <div key={cmd} className="text-[10px] font-mono text-[var(--color-text2)] bg-[var(--color-bg)] rounded px-2 py-1 mb-1 cursor-pointer hover:text-[var(--color-text)]"
+                  onClick={() => navigator.clipboard.writeText(cmd.split(': ')[1])}>
+                  {cmd}
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${srv.connected ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                    {srv.connected ? 'Connected' : 'Disconnected'}
-                  </span>
-                  <span className="text-[10px] text-[var(--color-text2)]">{srv.tools || 0} tools</span>
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
+
+            <button onClick={async () => {
+              await putJSON('/api/config', { provider: selProvider, model: selModel });
+              setSaved(true); setTimeout(() => setSaved(false), 2000);
+            }} className="w-full py-2 bg-[var(--color-accent)] text-white rounded text-sm">
+              Apply
+            </button>
           </div>
         )}
       </div>
