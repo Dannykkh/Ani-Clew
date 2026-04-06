@@ -75,6 +75,7 @@ interface TreeNode {
 }
 
 export function SidePanel({ visible, mode, onFileClick, onSessionClick, onNewChat, onProjectSwitch }: Props) {
+  const [sessionSearch, setSessionSearch] = useState('');
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [showProjectList, setShowProjectList] = useState(false);
@@ -300,11 +301,21 @@ export function SidePanel({ visible, mode, onFileClick, onSessionClick, onNewCha
               + {ko ? '새 대화' : 'New'}
             </button>
           </div>
+          {sessions.length > 3 && (
+            <div className="px-2 py-1">
+              <input
+                value={sessionSearch}
+                onChange={(e) => setSessionSearch(e.target.value)}
+                placeholder={ko ? '검색...' : 'Search...'}
+                className="w-full bg-[var(--color-bg)] border border-[var(--color-border)] rounded px-2 py-1 text-[11px] text-[var(--color-text)] placeholder:text-[var(--color-text2)]"
+              />
+            </div>
+          )}
           <div className="py-1">
             {sessions.length === 0 ? (
               <div className="px-3 py-4 text-xs text-[var(--color-text2)] text-center">{ko ? '대화 기록 없음' : 'No history'}</div>
             ) : (
-              sessions.map((s) => (
+              sessions.filter(s => !sessionSearch || s.title.toLowerCase().includes(sessionSearch.toLowerCase()) || s.preview.toLowerCase().includes(sessionSearch.toLowerCase())).map((s) => (
                 <div
                   key={s.id}
                   onClick={() => onSessionClick?.(s.id)}
