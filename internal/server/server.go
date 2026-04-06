@@ -226,6 +226,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc("POST /api/agent", s.handleAgentLoop)
 	mux.HandleFunc("POST /api/chronos", s.handleChronos)
 	mux.HandleFunc("POST /api/team", s.handleTeamExecute)
+	mux.HandleFunc("GET /api/agent-types", s.handleAgentTypes)
+	mux.HandleFunc("GET /api/worktrees", s.handleWorktrees)
 
 	// Image upload
 	mux.HandleFunc("POST /api/upload", s.handleImageUpload)
@@ -1707,6 +1709,23 @@ func (s *Server) handleAgentLoop(w http.ResponseWriter, r *http.Request) {
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}
+}
+
+// ── Agent Types & Worktrees ──
+
+func (s *Server) handleAgentTypes(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, agent.BuiltinAgentTypes())
+}
+
+func (s *Server) handleWorktrees(w http.ResponseWriter, _ *http.Request) {
+	s.mu.RLock()
+	workDir := s.workDir
+	s.mu.RUnlock()
+	if workDir == "" {
+		writeJSON(w, []any{})
+		return
+	}
+	writeJSON(w, agent.ListWorktrees(workDir))
 }
 
 // ── Team Execution ──

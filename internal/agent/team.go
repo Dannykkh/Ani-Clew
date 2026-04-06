@@ -57,12 +57,14 @@ type Team struct {
 }
 
 type workerState struct {
-	ID       string
-	Name     string
-	TaskID   string
-	Status   string // running, idle, shutdown
-	StartedAt time.Time
-	cancel   context.CancelFunc
+	ID          string
+	Name        string
+	TaskID      string
+	Status      string // running, idle, shutdown
+	StartedAt   time.Time
+	IdleSince   time.Time
+	cancel      context.CancelFunc
+	onIdle      []func(string) // callbacks when worker becomes idle
 }
 
 // NewTeam creates a team orchestrator.
@@ -347,9 +349,17 @@ func (t *Team) executeTask(ctx context.Context, task *TeamTask) {
 		task.Status = "completed"
 	}
 
-	// Notify lead
-	t.workers[workerID].Status = "idle"
+	// Mark idle and fire callbacks
+	w := t.workers[workerID]
+	w.Status = "idle"
+	w.IdleSince = time.Now()
+	callbacks := make([]func(string), len(w.onIdle))
+	copy(callbacks, w.onIdle)
 	t.mu.Unlock()
+
+	for _, cb := range callbacks {
+		cb(workerID)
+	}
 
 	// Send idle notification
 	t.mailbox.Send(TeamMessage{
