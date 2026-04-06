@@ -175,6 +175,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("PUT /api/workspace", s.handleSetWorkspace)
 	mux.HandleFunc("GET /api/workspace", s.handleGetWorkspace)
 	mux.HandleFunc("GET /api/file", s.handleReadFile)
+	mux.HandleFunc("POST /api/file/write", s.handleWriteFile)
 	mux.HandleFunc("GET /api/tree", s.handleFileTree)
 	mux.HandleFunc("PUT /api/config", s.handleSetConfig)
 	mux.HandleFunc("GET /api/routes", s.handleGetRoutes)
@@ -808,6 +809,41 @@ type treeNode struct {
 	Size     int64       `json:"size,omitempty"`
 	Lines    int         `json:"lines,omitempty"`
 	Children []*treeNode `json:"children,omitempty"`
+}
+
+func (s *Server) handleWriteFile(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	wd := s.workDir
+	s.mu.RUnlock()
+	if wd == "" { wd, _ = os.Getwd() }
+
+	var body struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, 400, "Invalid JSON")
+		return
+	}
+
+	// Security: prevent path traversal
+	fullPath := filepath.Join(wd, body.Path)
+	absWd, _ := filepath.Abs(wd)
+	absFile, _ := filepath.Abs(fullPath)
+	if !strings.HasPrefix(absFile, absWd) {
+		writeError(w, 403, "Access denied: path outside workspace")
+		return
+	}
+
+	// Create parent directories if needed
+	os.MkdirAll(filepath.Dir(fullPath), 0755)
+
+	if err := os.WriteFile(fullPath, []byte(body.Content), 0644); err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+
+	writeJSON(w, map[string]any{"ok": true, "path": body.Path, "size": len(body.Content)})
 }
 
 func (s *Server) handleFileTree(w http.ResponseWriter, _ *http.Request) {

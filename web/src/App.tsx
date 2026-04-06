@@ -32,6 +32,8 @@ function App() {
   const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [viewingFile, setViewingFile] = useState<{ path: string; content: string } | null>(null);
+  const [editMode, setEditMode] = useState(false);
+  const [editContent, setEditContent] = useState('');
 
   const activeProject = projects.find(p => p.active);
   const { toast, dismissToast } = useToast();
@@ -109,10 +111,46 @@ function App() {
           viewingFile ? (
             <div className="flex flex-col h-full w-full">
               <div className="px-4 py-1.5 border-b border-[var(--color-border)] bg-[var(--color-surface)] flex items-center justify-between">
-                <div className="text-xs font-mono text-[var(--color-accent)]">{viewingFile.path}</div>
-                <button onClick={() => setViewingFile(null)} className="text-xs text-[var(--color-text2)] hover:text-[var(--color-text)]">Close</button>
+                <div className="flex items-center gap-2">
+                  <div className="text-xs font-mono text-[var(--color-accent)]">{viewingFile.path}</div>
+                  {editMode && <span className="text-[9px] bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded">EDITING</span>}
+                </div>
+                <div className="flex items-center gap-2">
+                  {editMode ? (
+                    <>
+                      <button
+                        onClick={async () => {
+                          await fetch('/api/file/write', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ path: viewingFile.path, content: editContent }),
+                          });
+                          setViewingFile({ ...viewingFile, content: editContent });
+                          setEditMode(false);
+                        }}
+                        className="text-xs px-2 py-0.5 bg-[var(--color-green)] text-white rounded hover:opacity-80"
+                      >Save</button>
+                      <button onClick={() => { setEditMode(false); setEditContent(''); }} className="text-xs text-[var(--color-text2)] hover:text-[var(--color-text)]">Cancel</button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => { setEditMode(true); setEditContent(viewingFile.content); }}
+                      className="text-xs px-2 py-0.5 bg-[var(--color-surface2)] text-[var(--color-text)] rounded hover:bg-[var(--color-border)]"
+                    >Edit</button>
+                  )}
+                  <button onClick={() => { setViewingFile(null); setEditMode(false); }} className="text-xs text-[var(--color-text2)] hover:text-[var(--color-text)]">Close</button>
+                </div>
               </div>
-              <pre className="flex-1 overflow-auto p-4 text-xs font-mono text-[var(--color-text)] bg-[var(--color-bg)] leading-relaxed whitespace-pre-wrap">{viewingFile.content}</pre>
+              {editMode ? (
+                <textarea
+                  value={editContent}
+                  onChange={(e) => setEditContent(e.target.value)}
+                  className="flex-1 p-4 text-xs font-mono text-[var(--color-text)] bg-[var(--color-bg)] leading-relaxed resize-none focus:outline-none"
+                  spellCheck={false}
+                />
+              ) : (
+                <pre className="flex-1 overflow-auto p-4 text-xs font-mono text-[var(--color-text)] bg-[var(--color-bg)] leading-relaxed whitespace-pre-wrap">{viewingFile.content}</pre>
+              )}
             </div>
           ) : (
             <ChatPage loadSessionId={loadSessionId} onSessionLoaded={() => setLoadSessionId(null)} />
