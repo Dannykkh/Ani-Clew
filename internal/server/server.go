@@ -223,6 +223,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("GET /api/gateway/audit", s.handleGatewayAudit)
 
 	// Agent loop (coding agent)
+	mux.HandleFunc("POST /api/ask", s.handleAskModel)
 	mux.HandleFunc("POST /api/agent", s.handleAgentLoop)
 	mux.HandleFunc("POST /api/chronos", s.handleChronos)
 	mux.HandleFunc("POST /api/team", s.handleTeamExecute)
@@ -1708,6 +1709,44 @@ func (s *Server) handleAgentLoop(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "data: {\"type\":\"stream_end\"}\n\n")
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
+	}
+}
+
+// ── Ask Model (no tools) ──
+
+func (s *Server) handleAskModel(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	provider := s.activeProvider
+	model := s.activeModel
+	s.mu.RUnlock()
+
+	if provider == nil {
+		writeError(w, 500, "No provider configured")
+		return
+	}
+
+	var body struct {
+		Question     string `json:"question"`
+		SystemPrompt string `json:"systemPrompt"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, 400, "Invalid JSON")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(200)
+
+	eventCh := make(chan agent.Event, 64)
+	go agent.AskModel(r.Context(), provider, model, body.Question, body.SystemPrompt, eventCh)
+
+	for event := range eventCh {
+		data, _ := json.Marshal(event)
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
 	}
 }
 

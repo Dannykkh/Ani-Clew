@@ -182,6 +182,9 @@ func RunLoop(
 			eventCh <- Event{Type: "status", Data: fmt.Sprintf("Compacted to %d messages", len(messages))}
 		}
 
+		// Normalize messages before API call
+		messages = NormalizeMessages(messages)
+
 		// Build request with full context
 		sysPrompt := buildSystemPrompt(responseLang) + projectPrompt + projectCtx + skillText
 		req := &types.MessagesRequest{
