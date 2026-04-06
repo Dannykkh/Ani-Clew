@@ -257,32 +257,31 @@ export function ChatPage({ loadSessionId, onSessionLoaded }: ChatPageProps) {
       {/* Messages Area — full width */}
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
             {messages.length === 0 && (
-              <div className="flex flex-col items-center justify-center h-full text-[var(--color-text2)]">
+              <div className="flex flex-col items-center justify-center h-full text-[var(--color-text2)] max-w-lg mx-auto">
                 <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[var(--color-accent)] to-purple-400 flex items-center justify-center text-white text-xl font-bold mb-5">A</div>
-                <div className="text-xl font-semibold mb-1 text-[var(--color-text)]">{t('chat.welcome')}</div>
-                <div className="text-sm mb-6">{t('chat.welcomeSub')}</div>
+                <div className="text-xl font-semibold mb-2 text-[var(--color-text)]">What can I help you with?</div>
+                <div className="text-sm mb-8 text-center">I can read your code, write new files, run commands, search your project, and more.</div>
 
-                {/* Example prompts */}
-                <div className="grid grid-cols-2 gap-2 max-w-lg w-full">
+                <div className="grid grid-cols-2 gap-2.5 w-full">
                   {[
-                    { text: 'Explain this project structure', icon: '🔍' },
-                    { text: 'Find and fix bugs in src/', icon: '🐛' },
-                    { text: 'Write tests for the main module', icon: '🧪' },
-                    { text: 'Refactor this code to be cleaner', icon: '✨' },
+                    { text: 'What does this project do?', desc: 'Understand the codebase' },
+                    { text: 'Find bugs and fix them', desc: 'Debug and repair' },
+                    { text: 'Add a new feature', desc: 'Write code for me' },
+                    { text: 'Clean up this code', desc: 'Improve quality' },
                   ].map((example) => (
                     <button
                       key={example.text}
                       onClick={() => { setInput(example.text); }}
-                      className="text-left px-3 py-2.5 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg text-xs hover:border-[var(--color-accent)] transition-colors"
+                      className="text-left px-4 py-3 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl hover:border-[var(--color-accent)] transition-colors"
                     >
-                      <span className="mr-1.5">{example.icon}</span>
-                      {example.text}
+                      <div className="text-sm text-[var(--color-text)]">{example.text}</div>
+                      <div className="text-[10px] text-[var(--color-text2)] mt-0.5">{example.desc}</div>
                     </button>
                   ))}
                 </div>
 
-                <div className="text-[10px] mt-4 text-[var(--color-text2)]">
-                  {t('chat.tools')}
+                <div className="text-[10px] mt-6 text-center leading-relaxed">
+                  Tip: Just type what you need in plain language. I'll figure out which files to read and what to do.
                 </div>
               </div>
             )}

@@ -33,8 +33,8 @@ export function CostsPage() {
 
   return (
     <div className="p-6 w-full overflow-y-auto h-full">
-      <h1 className="text-xl font-semibold mb-1">Monitoring</h1>
-      <p className="text-sm text-[var(--color-text2)] mb-6">Request tracking, costs, latency, and response quality</p>
+      <h1 className="text-xl font-semibold mb-1">Activity</h1>
+      <p className="text-sm text-[var(--color-text2)] mb-6">How your AI is being used — requests, speed, costs, and quality</p>
 
       {/* Metrics Cards */}
       <div className="grid grid-cols-5 gap-3 mb-6">
