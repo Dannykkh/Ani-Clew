@@ -155,6 +155,23 @@ func (t *Translator) End() []types.SSEEvent {
 		t.blockIndex++
 		t.thinkingOpen = false
 	}
+	// If only thinking happened with no text, emit empty text block
+	// (some thinking models produce reasoning but no content when max_tokens is low)
+	if !t.textOpen && t.blockIndex > 0 {
+		idx := t.blockIndex
+		events = append(events, types.SSEEvent{
+			Type:         "content_block_start",
+			Index:        &idx,
+			ContentBlock: mustMarshal(map[string]string{"type": "text", "text": ""}),
+		})
+		events = append(events, types.SSEEvent{
+			Type:  "content_block_delta",
+			Index: &idx,
+			Delta: mustMarshal(map[string]string{"type": "text_delta", "text": "(No text output — only reasoning was produced)"}),
+		})
+		events = append(events, types.SSEEvent{Type: "content_block_stop", Index: &idx})
+		t.blockIndex++
+	}
 	if t.textOpen {
 		events = append(events, t.closeTextBlock()...)
 	}

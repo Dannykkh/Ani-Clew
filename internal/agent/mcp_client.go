@@ -253,6 +253,9 @@ func (c *MCPClient) call(method string, params interface{}) (json.RawMessage, er
 		return resp.Result, nil
 
 	case <-time.After(mcpCallTimeout):
+		// Mark as not running — goroutine will exit when pipe closes
+		c.running = false
+		log.Printf("[MCP] Call '%s' timed out after %v — marking server as dead", method, mcpCallTimeout)
 		return nil, fmt.Errorf("MCP call '%s' timed out after %v", method, mcpCallTimeout)
 	}
 }

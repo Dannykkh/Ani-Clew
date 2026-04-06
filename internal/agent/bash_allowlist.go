@@ -295,8 +295,47 @@ func IsReadOnlyCommand(command string) bool {
 			continue
 		}
 		for _, df := range config.DangerousFlags {
-			if arg == df || strings.HasPrefix(arg, df+"=") || strings.HasPrefix(arg, df+" ") {
+			if arg == df || strings.HasPrefix(arg, df+"=") {
 				return false
+			}
+		}
+	}
+
+	// Validate all flags are in the safe list
+	if len(config.SafeFlags) > 0 {
+		for i := 0; i < len(cmdArgs); i++ {
+			arg := cmdArgs[i]
+			if !strings.HasPrefix(arg, "-") {
+				continue // positional arg, skip
+			}
+
+			// Handle --flag=value
+			flagName := arg
+			if idx := strings.Index(arg, "="); idx > 0 {
+				flagName = arg[:idx]
+			}
+
+			flagType, known := config.SafeFlags[flagName]
+			if !known {
+				// Try combined short flags: -nE → -n + -E
+				if len(flagName) > 2 && flagName[0] == '-' && flagName[1] != '-' {
+					allKnown := true
+					for _, c := range flagName[1:] {
+						if _, ok := config.SafeFlags["-"+string(c)]; !ok {
+							allKnown = false
+							break
+						}
+					}
+					if allKnown {
+						continue
+					}
+				}
+				return false // unknown flag = not read-only
+			}
+
+			// Skip the flag's argument if it takes one
+			if flagType != FlagNone && !strings.Contains(arg, "=") && i+1 < len(cmdArgs) {
+				i++ // consume the argument
 			}
 		}
 	}

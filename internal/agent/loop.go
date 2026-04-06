@@ -335,7 +335,14 @@ func RunLoop(
 
 			for idx, tu := range concurrentTools {
 				go func(i int, t toolUseBlock) {
+					hookRegistry.Execute(hooks.HookPreToolUse, map[string]string{
+						"TOOL_NAME": t.Name, "WORK_DIR": workDir,
+					})
 					r, isErr := ExecuteTool(t.Name, t.Input, workDir)
+					hookRegistry.Execute(hooks.HookPostToolUse, map[string]string{
+						"TOOL_NAME": t.Name, "WORK_DIR": workDir,
+						"TOOL_ERROR": fmt.Sprintf("%v", isErr),
+					})
 					resultCh <- toolResultEntry{
 						idx: i,
 						result: map[string]interface{}{
