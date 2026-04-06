@@ -116,7 +116,7 @@ function App() {
         {page === 'costs' && <CostsPage />}
         {page === 'kairos' && <KairosPage />}
         {page === 'settings' && (
-          <div className="overflow-y-auto h-full">
+          <div className="overflow-y-auto h-full w-full">
             <SettingsPage />
             <div className="border-t border-[var(--color-border)]">
               <MemoryPage />

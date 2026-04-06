@@ -39,7 +39,7 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="p-6 w-full max-w-3xl mx-auto">
+    <div className="p-6 w-full overflow-y-auto h-full">
       <h1 className="text-xl font-semibold mb-6">{t('settings.title')}</h1>
 
       {/* Provider & Model */}

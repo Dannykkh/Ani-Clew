@@ -222,6 +222,11 @@ func (s *Server) Start() error {
 	mux.HandleFunc("POST /api/gateway/users", s.handleGatewayAddUser)
 	mux.HandleFunc("GET /api/gateway/audit", s.handleGatewayAudit)
 
+	// Bridge (remote control)
+	mux.HandleFunc("POST /api/bridge/session", s.handleBridgeCreate)
+	mux.HandleFunc("POST /api/bridge/send", s.handleBridgeSend)
+	mux.HandleFunc("GET /api/bridge/sessions", s.handleBridgeList)
+
 	// Agent loop (coding agent)
 	mux.HandleFunc("POST /api/ask", s.handleAskModel)
 	mux.HandleFunc("POST /api/agent", s.handleAgentLoop)
@@ -1710,6 +1715,52 @@ func (s *Server) handleAgentLoop(w http.ResponseWriter, r *http.Request) {
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}
+}
+
+// ── Bridge (remote control) ──
+
+func (s *Server) handleBridgeCreate(w http.ResponseWriter, _ *http.Request) {
+	s.mu.RLock()
+	provider := s.activeProvider
+	model := s.activeModel
+	workDir := s.workDir
+	s.mu.RUnlock()
+
+	if provider == nil {
+		writeError(w, 500, "No provider configured")
+		return
+	}
+
+	bridge := agent.NewBridge(provider, model, workDir)
+	sess := bridge.CreateSession()
+	writeJSON(w, sess)
+}
+
+func (s *Server) handleBridgeSend(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	provider := s.activeProvider
+	model := s.activeModel
+	workDir := s.workDir
+	s.mu.RUnlock()
+
+	var body struct {
+		SessionID string `json:"sessionId"`
+		Message   string `json:"message"`
+	}
+	json.NewDecoder(r.Body).Decode(&body)
+
+	bridge := agent.NewBridge(provider, model, workDir)
+	sess := bridge.CreateSession()
+	result, err := bridge.Send(sess.ID, body.Message)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]string{"response": result, "sessionId": sess.ID})
+}
+
+func (s *Server) handleBridgeList(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, []any{})
 }
 
 // ── Ask Model (no tools) ──
