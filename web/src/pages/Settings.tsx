@@ -20,7 +20,7 @@ export function SettingsPage() {
       setSelModel(c.model);
       setResponseLang(c.responseLang || 'auto');
     });
-    fetchJSON<any[]>('/api/mcp').then(setMcpServers).catch(() => setMcpServers([]));
+    fetchJSON<any>('/api/mcp').then(data => setMcpServers(Array.isArray(data) ? data : (data?.servers || []))).catch(() => setMcpServers([]));
   }, []);
 
   const models = providers.find((p) => p.name === selProvider)?.models || [];
