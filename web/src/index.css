@@ -53,3 +53,16 @@ body {
 .chat-md pre { background: var(--color-bg); padding: 12px; border-radius: 8px; overflow-x: auto; }
 .chat-md code { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 13px; }
 .chat-md p { margin: 8px 0; }
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  .w-12 { width: 2.5rem; }
+  .w-64 { width: 100%; max-width: 16rem; }
+  .px-6 { padding-left: 1rem; padding-right: 1rem; }
+  .text-xl { font-size: 1rem; }
+  .gap-4 { gap: 0.5rem; }
+  .grid-cols-5 { grid-template-columns: repeat(2, 1fr); }
+  .grid-cols-4 { grid-template-columns: repeat(2, 1fr); }
+  .grid-cols-3 { grid-template-columns: repeat(1, 1fr); }
+  .grid-cols-2 { grid-template-columns: repeat(1, 1fr); }
+}

@@ -6,6 +6,9 @@ export function TeamPage() {
   const [audit, setAudit] = useState<any[]>([]);
   const [newUser, setNewUser] = useState({ name: '', role: 'developer', budget: 50 });
   const [copied, setCopied] = useState('');
+  const [teamTasks, setTeamTasks] = useState([{ id: 'task-1', name: '', description: '', files: '', dependsOn: '' }]);
+  const [teamRunning, setTeamRunning] = useState(false);
+  const [teamLog, setTeamLog] = useState<string[]>([]);
 
   useEffect(() => { load(); }, []);
 
@@ -31,9 +34,97 @@ export function TeamPage() {
     setTimeout(() => setCopied(''), 2000);
   }
 
+  function addTaskRow() {
+    const id = `task-${teamTasks.length + 1}`;
+    setTeamTasks([...teamTasks, { id, name: '', description: '', files: '', dependsOn: '' }]);
+  }
+
+  async function runTeam() {
+    setTeamRunning(true);
+    setTeamLog([]);
+    const tasks = teamTasks.filter(t => t.name && t.description).map(t => ({
+      id: t.id,
+      name: t.name,
+      description: t.description,
+      files: t.files ? t.files.split(',').map(f => f.trim()) : [],
+      dependsOn: t.dependsOn ? t.dependsOn.split(',').map(d => d.trim()) : [],
+    }));
+
+    try {
+      const res = await fetch('/api/team', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'web-team', tasks }),
+      });
+
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const event = JSON.parse(line.slice(6));
+              if (event.type === 'status' || event.type === 'text') {
+                setTeamLog(prev => [...prev, typeof event.data === 'string' ? event.data : JSON.stringify(event.data)]);
+              }
+            } catch {}
+          }
+        }
+      }
+    } catch (err) {
+      setTeamLog(prev => [...prev, `Error: ${err}`]);
+    }
+    setTeamRunning(false);
+  }
+
   return (
-    <div className="p-6 w-full">
-      <h1 className="text-xl font-semibold mb-6">Team Gateway</h1>
+    <div className="p-6 w-full overflow-y-auto h-full">
+      <h1 className="text-xl font-semibold mb-6">Team</h1>
+
+      {/* Agent Team Execution */}
+      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-4 mb-6">
+        <div className="text-xs text-[var(--color-text2)] uppercase mb-3">Agent Team — Wave Execution</div>
+
+        {teamTasks.map((task, i) => (
+          <div key={task.id} className="flex gap-2 mb-2">
+            <input value={task.name} onChange={(e) => { const t = [...teamTasks]; t[i].name = e.target.value; setTeamTasks(t); }}
+              placeholder="Task name" className="w-32 bg-[var(--color-bg)] border border-[var(--color-border)] rounded px-2 py-1.5 text-xs text-[var(--color-text)]" />
+            <input value={task.description} onChange={(e) => { const t = [...teamTasks]; t[i].description = e.target.value; setTeamTasks(t); }}
+              placeholder="Description (what to do)" className="flex-1 bg-[var(--color-bg)] border border-[var(--color-border)] rounded px-2 py-1.5 text-xs text-[var(--color-text)]" />
+            <input value={task.files} onChange={(e) => { const t = [...teamTasks]; t[i].files = e.target.value; setTeamTasks(t); }}
+              placeholder="Files (comma)" className="w-36 bg-[var(--color-bg)] border border-[var(--color-border)] rounded px-2 py-1.5 text-xs text-[var(--color-text)]" />
+            <input value={task.dependsOn} onChange={(e) => { const t = [...teamTasks]; t[i].dependsOn = e.target.value; setTeamTasks(t); }}
+              placeholder="Depends on" className="w-28 bg-[var(--color-bg)] border border-[var(--color-border)] rounded px-2 py-1.5 text-xs text-[var(--color-text)]" />
+          </div>
+        ))}
+
+        <div className="flex gap-2 mt-3">
+          <button onClick={addTaskRow} className="text-xs px-3 py-1.5 bg-[var(--color-surface2)] text-[var(--color-text)] rounded hover:bg-[var(--color-border)]">
+            + Add Task
+          </button>
+          <button onClick={runTeam} disabled={teamRunning}
+            className="text-xs px-4 py-1.5 bg-[var(--color-accent)] text-white rounded hover:opacity-80 disabled:opacity-40">
+            {teamRunning ? 'Running...' : 'Execute Team'}
+          </button>
+        </div>
+
+        {teamLog.length > 0 && (
+          <div className="mt-3 bg-[var(--color-bg)] rounded p-3 font-mono text-xs max-h-40 overflow-y-auto">
+            {teamLog.map((log, i) => (
+              <div key={i} className="py-0.5 text-[var(--color-text2)]">{log}</div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <h2 className="text-lg font-semibold mb-4">Team Gateway</h2>
 
       {/* Add User */}
       <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-4 mb-6">
