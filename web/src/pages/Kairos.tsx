@@ -61,14 +61,18 @@ export function KairosPage() {
 
   return (
     <div className="p-6 w-full">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-semibold">KAIROS Daemon</h1>
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <h1 className="text-xl font-semibold">Background Agent</h1>
+          <p className="text-sm text-[var(--color-text2)]">Runs tasks automatically — git monitoring, scheduled jobs, notifications</p>
+        </div>
         {status?.enabled ? (
           <button onClick={stop} className="px-4 py-2 bg-[var(--color-red)] text-white rounded-lg text-sm">Stop</button>
         ) : (
           <button onClick={start} className="px-4 py-2 bg-[var(--color-green)] text-white rounded-lg text-sm">Start</button>
         )}
       </div>
+      <div className="mb-6" />
 
       {/* Status */}
       <div className="grid grid-cols-4 gap-4 mb-6">

@@ -10,9 +10,9 @@ interface NavItem {
 const items: NavItem[] = [
   { id: 'chat', label: 'Chat', labelKo: '채팅', section: 'top' },
   { id: 'files', label: 'Files', labelKo: '파일', section: 'top' },
-  { id: 'routes', label: 'Routes', labelKo: '라우팅', section: 'top' },
-  { id: 'costs', label: 'Observe', labelKo: '관측', section: 'bottom' },
-  { id: 'kairos', label: 'Daemon', labelKo: '데몬', section: 'bottom' },
+  { id: 'routes', label: 'Router', labelKo: '라우터', section: 'top' },
+  { id: 'costs', label: 'Monitor', labelKo: '모니터', section: 'bottom' },
+  { id: 'kairos', label: 'Agent', labelKo: '에이전트', section: 'bottom' },
   { id: 'memory', label: 'Memory', labelKo: '메모리', section: 'bottom' },
   { id: 'team', label: 'Team', labelKo: '팀', section: 'bottom' },
   { id: 'settings', label: 'Settings', labelKo: '설정', section: 'bottom' },

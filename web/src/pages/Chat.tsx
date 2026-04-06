@@ -238,19 +238,19 @@ export function ChatPage({ loadSessionId, onSessionLoaded }: ChatPageProps) {
 
   return (
     <div className="flex flex-col h-full w-full">
-      {/* Header — minimal */}
-      <div className="px-4 py-1.5 border-b border-[var(--color-border)] bg-[var(--color-surface)] flex items-center justify-between">
+      {/* Header */}
+      <div className="px-4 py-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <h1 className="text-xs font-semibold text-[var(--color-text2)]">{t('chat.title')}</h1>
-        </div>
-        <div className="flex items-center gap-2 text-xs text-[var(--color-text2)]">
-          {status && (
-            <div className="flex items-center gap-1.5 text-[var(--color-accent)]">
+          {status ? (
+            <div className="flex items-center gap-1.5 text-[var(--color-accent)] text-xs">
               <div className="w-2 h-2 rounded-full bg-[var(--color-accent)] animate-pulse" />
               {status}
             </div>
+          ) : (
+            <span className="text-xs text-[var(--color-text2)]">
+              {messages.length > 0 ? `${messages.filter(m => m.role === 'user').length} messages` : 'New conversation'}
+            </span>
           )}
-          <span>{messages.filter((m) => m.role === 'user').length} {t('session.turns')}</span>
         </div>
       </div>
 
@@ -258,10 +258,32 @@ export function ChatPage({ loadSessionId, onSessionLoaded }: ChatPageProps) {
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
             {messages.length === 0 && (
               <div className="flex flex-col items-center justify-center h-full text-[var(--color-text2)]">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[var(--color-accent)] to-purple-400 flex items-center justify-center text-white text-lg font-bold mb-4">A</div>
-                <div className="text-lg font-medium mb-2">{t('chat.welcome')}</div>
-                <div className="text-sm">{t('chat.welcomeSub')}</div>
-                <div className="text-xs mt-2 text-[var(--color-text2)]">{t('chat.tools')}</div>
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[var(--color-accent)] to-purple-400 flex items-center justify-center text-white text-xl font-bold mb-5">A</div>
+                <div className="text-xl font-semibold mb-1 text-[var(--color-text)]">{t('chat.welcome')}</div>
+                <div className="text-sm mb-6">{t('chat.welcomeSub')}</div>
+
+                {/* Example prompts */}
+                <div className="grid grid-cols-2 gap-2 max-w-lg w-full">
+                  {[
+                    { text: 'Explain this project structure', icon: '🔍' },
+                    { text: 'Find and fix bugs in src/', icon: '🐛' },
+                    { text: 'Write tests for the main module', icon: '🧪' },
+                    { text: 'Refactor this code to be cleaner', icon: '✨' },
+                  ].map((example) => (
+                    <button
+                      key={example.text}
+                      onClick={() => { setInput(example.text); }}
+                      className="text-left px-3 py-2.5 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg text-xs hover:border-[var(--color-accent)] transition-colors"
+                    >
+                      <span className="mr-1.5">{example.icon}</span>
+                      {example.text}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="text-[10px] mt-4 text-[var(--color-text2)]">
+                  {t('chat.tools')}
+                </div>
               </div>
             )}
 
@@ -347,7 +369,7 @@ export function ChatPage({ loadSessionId, onSessionLoaded }: ChatPageProps) {
           </div>
 
           {/* Input */}
-          <div className="p-4 border-t border-[var(--color-border)] bg-[var(--color-surface)]">
+          <div className="px-4 py-3 border-t border-[var(--color-border)] bg-[var(--color-surface)]">
             {/* Image preview */}
             {attachedImage && (
               <div className="w-full mb-2 flex items-center gap-2">
