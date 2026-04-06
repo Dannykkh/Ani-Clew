@@ -964,6 +964,19 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 	}
 
+	// Persist to config.json
+	cfg := config.Load()
+	if update.Provider != "" {
+		cfg.DefaultProvider = update.Provider
+	}
+	if update.Model != "" {
+		cfg.DefaultModel = update.Model
+	}
+	if update.ResponseLang != "" {
+		cfg.ResponseLang = update.ResponseLang
+	}
+	config.Save(cfg)
+
 	s.mu.RLock()
 	writeJSON(w, map[string]any{
 		"ok":            true,

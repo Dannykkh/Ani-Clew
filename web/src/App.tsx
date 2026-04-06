@@ -118,12 +118,16 @@ function App() {
         {page === 'settings' && (
           <div className="overflow-y-auto h-full w-full">
             <SettingsPage />
-            <div className="border-t border-[var(--color-border)]">
-              <MemoryPage />
-            </div>
-            <div className="border-t border-[var(--color-border)]">
-              <TeamPage />
-            </div>
+          </div>
+        )}
+        {page === 'memory' && (
+          <div className="overflow-y-auto h-full w-full">
+            <MemoryPage />
+          </div>
+        )}
+        {page === 'team' && (
+          <div className="overflow-y-auto h-full w-full">
+            <TeamPage />
           </div>
         )}
       </main>
