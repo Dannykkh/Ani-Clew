@@ -20,10 +20,18 @@ type Notification struct {
 
 // Notifier manages webhook and SSE subscribers.
 type Notifier struct {
-	mu          sync.RWMutex
-	webhookURL  string
-	subscribers map[chan Notification]struct{}
-	history     []Notification
+	mu              sync.RWMutex
+	webhookURL      string
+	subscribers     map[chan Notification]struct{}
+	history         []Notification
+	onSystemNotify  func(title, message string) // desktop notification callback
+}
+
+// SetSystemNotifyCallback sets the desktop notification handler.
+func (n *Notifier) SetSystemNotifyCallback(fn func(title, message string)) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.onSystemNotify = fn
 }
 
 func NewNotifier() *Notifier {
@@ -91,6 +99,11 @@ func (n *Notifier) Send(notif Notification) {
 	// Send to webhook
 	if webhookURL != "" {
 		go n.sendWebhook(webhookURL, notif)
+	}
+
+	// System notification callback (set by tray integration)
+	if n.onSystemNotify != nil {
+		go n.onSystemNotify(notif.Title, notif.Message)
 	}
 }
 

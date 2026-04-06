@@ -237,6 +237,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("GET /api/worktrees", s.handleWorktrees)
 	mux.HandleFunc("GET /api/plugins", s.handlePlugins)
 	mux.HandleFunc("GET /api/rag", s.handleRAGSearch)
+	mux.HandleFunc("POST /api/multi-model", s.handleMultiModel)
 
 	// Image upload
 	mux.HandleFunc("POST /api/upload", s.handleImageUpload)
@@ -1876,6 +1877,32 @@ func (s *Server) handleAskModel(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAgentTypes(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, agent.BuiltinAgentTypes())
+}
+
+func (s *Server) handleMultiModel(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Prompt  string `json:"prompt"`
+		Models  []struct {
+			Provider string `json:"provider"`
+			Model    string `json:"model"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, 400, "Invalid JSON")
+		return
+	}
+	if body.Prompt == "" || len(body.Models) == 0 {
+		writeError(w, 400, "prompt and models required")
+		return
+	}
+
+	targets := make([]struct{ Provider, Model string }, len(body.Models))
+	for i, m := range body.Models {
+		targets[i] = struct{ Provider, Model string }{m.Provider, m.Model}
+	}
+
+	results := agent.MultiModelQuery(r.Context(), body.Prompt, targets)
+	writeJSON(w, results)
 }
 
 func (s *Server) handleRAGSearch(w http.ResponseWriter, r *http.Request) {
