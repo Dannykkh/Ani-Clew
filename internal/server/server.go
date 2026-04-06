@@ -234,6 +234,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("POST /api/team", s.handleTeamExecute)
 	mux.HandleFunc("GET /api/agent-types", s.handleAgentTypes)
 	mux.HandleFunc("GET /api/worktrees", s.handleWorktrees)
+	mux.HandleFunc("GET /api/plugins", s.handlePlugins)
 
 	// Image upload
 	mux.HandleFunc("POST /api/upload", s.handleImageUpload)
@@ -1838,6 +1839,21 @@ func (s *Server) handleAskModel(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAgentTypes(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, agent.BuiltinAgentTypes())
+}
+
+func (s *Server) handlePlugins(w http.ResponseWriter, _ *http.Request) {
+	s.mu.RLock()
+	workDir := s.workDir
+	s.mu.RUnlock()
+
+	home, _ := os.UserHomeDir()
+	dirs := []string{
+		filepath.Join(workDir, ".claude", "plugins"),
+		filepath.Join(home, ".claude", "plugins"),
+	}
+	pm := agent.NewPluginManager(dirs...)
+	pm.LoadAll()
+	writeJSON(w, pm.GetPlugins())
 }
 
 func (s *Server) handleWorktrees(w http.ResponseWriter, _ *http.Request) {

@@ -30,6 +30,7 @@ function App() {
   const [loadSessionId, setLoadSessionId] = useState<string | null>(null);
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [showProjectPicker, setShowProjectPicker] = useState(false);
+  const [showModelPicker, setShowModelPicker] = useState(false);
   const [viewingFile, setViewingFile] = useState<{ path: string; content: string } | null>(null);
 
   const activeProject = projects.find(p => p.active);
@@ -139,9 +140,43 @@ function App() {
 
       {/* Status Bar */}
       <div className="fixed bottom-0 left-12 right-0 h-6 bg-[var(--color-surface)] border-t border-[var(--color-border)] flex items-center px-3 text-[10px] text-[var(--color-text2)] gap-4 z-50">
-        <div className="flex items-center gap-1.5">
-          <div className={`w-1.5 h-1.5 rounded-full ${status ? 'bg-[var(--color-green)]' : 'bg-[var(--color-red)]'}`} />
-          {status ? `${status.provider} / ${status.model}` : 'Offline'}
+        <div className="relative">
+          <button
+            onClick={() => setShowModelPicker(!showModelPicker)}
+            className="flex items-center gap-1.5 px-1.5 py-0.5 rounded hover:bg-[var(--color-surface2)] transition-colors"
+          >
+            <div className={`w-1.5 h-1.5 rounded-full ${status ? 'bg-[var(--color-green)]' : 'bg-[var(--color-red)]'}`} />
+            {status ? `${status.provider} / ${status.model}` : 'Offline'}
+            <span className="text-[8px]">▾</span>
+          </button>
+          {showModelPicker && (
+            <div className="absolute bottom-6 left-0 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg shadow-lg min-w-56 max-h-60 overflow-y-auto z-50">
+              {[
+                { provider: 'ollama', models: ['qwen3:8b', 'qwen3:14b', 'qwen3:32b'] },
+                { provider: 'openai', models: ['gpt-4o-mini', 'gpt-4o', 'o4-mini'] },
+                { provider: 'anthropic', models: ['claude-sonnet-4-6-20250217', 'claude-opus-4-6-20250205'] },
+                { provider: 'gemini', models: ['gemini-2.5-flash', 'gemini-2.5-pro'] },
+              ].map(group => (
+                <div key={group.provider}>
+                  <div className="px-3 py-1 text-[9px] text-[var(--color-text2)] uppercase">{group.provider}</div>
+                  {group.models.map(m => (
+                    <button
+                      key={m}
+                      onClick={async () => {
+                        await putJSON('/api/config', { provider: group.provider, model: m });
+                        const cfg = await fetchJSON<any>('/api/config');
+                        setStatus(cfg);
+                        setShowModelPicker(false);
+                      }}
+                      className={`w-full text-left px-3 py-1 text-[11px] hover:bg-[var(--color-surface2)] ${status?.model === m ? 'text-[var(--color-accent)]' : ''}`}
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         {status?.routerEnabled && <span>Router ON</span>}
 
