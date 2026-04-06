@@ -174,6 +174,10 @@ func ExecuteTool(name string, input json.RawMessage, workDir string) (string, bo
 		return executeGlobV2(input, workDir)
 	case "Grep":
 		return executeGrepV2(input, workDir)
+	case "WebFetch":
+		return executeWebFetch(input, workDir)
+	case "WebSearch":
+		return executeWebSearch(input, workDir)
 	default:
 		return fmt.Sprintf("Unknown tool: %s", name), true
 	}

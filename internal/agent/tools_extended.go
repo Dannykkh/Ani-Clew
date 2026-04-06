@@ -3,9 +3,6 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"regexp"
@@ -131,10 +128,10 @@ func ExtendedToolDefs() []types.ToolDef {
 func ExecuteExtendedTool(name string, input json.RawMessage, workDir string) (string, bool, bool) {
 	switch name {
 	case "WebSearch":
-		r, e := executeWebSearch(input)
+		r, e := executeWebSearch(input, workDir)
 		return r, e, true
 	case "WebFetch":
-		r, e := executeWebFetch(input)
+		r, e := executeWebFetch(input, workDir)
 		return r, e, true
 	case "Git":
 		r, e := executeGit(input, workDir)
@@ -162,85 +159,7 @@ func ExecuteExtendedTool(name string, input json.RawMessage, workDir string) (st
 	}
 }
 
-// ── Web Search ──
-
-func executeWebSearch(input json.RawMessage) (string, bool) {
-	var args struct{ Query string `json:"query"` }
-	json.Unmarshal(input, &args)
-
-	searchURL := "https://html.duckduckgo.com/html/?q=" + url.QueryEscape(args.Query)
-	req, _ := http.NewRequest("GET", searchURL, nil)
-	req.Header.Set("User-Agent", "AniClew/1.0")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Sprintf("Search failed: %v", err), true
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	html := string(body)
-
-	// Extract results from DuckDuckGo HTML
-	var results []string
-	re := regexp.MustCompile(`<a rel="nofollow" class="result__a" href="([^"]+)"[^>]*>(.+?)</a>`)
-	matches := re.FindAllStringSubmatch(html, 5)
-	for i, m := range matches {
-		title := stripHTML(m[2])
-		href := m[1]
-		results = append(results, fmt.Sprintf("%d. %s\n   %s", i+1, title, href))
-	}
-
-	if len(results) == 0 {
-		// Fallback: try snippet extraction
-		re2 := regexp.MustCompile(`<a class="result__snippet"[^>]*>(.+?)</a>`)
-		snippets := re2.FindAllStringSubmatch(html, 5)
-		for i, s := range snippets {
-			results = append(results, fmt.Sprintf("%d. %s", i+1, stripHTML(s[1])))
-		}
-	}
-
-	if len(results) == 0 {
-		return "No results found for: " + args.Query, false
-	}
-	return fmt.Sprintf("Search results for \"%s\":\n\n%s", args.Query, strings.Join(results, "\n\n")), false
-}
-
-// ── Web Fetch ──
-
-func executeWebFetch(input json.RawMessage) (string, bool) {
-	var args struct {
-		URL    string `json:"url"`
-		Prompt string `json:"prompt"`
-	}
-	json.Unmarshal(input, &args)
-
-	req, _ := http.NewRequest("GET", args.URL, nil)
-	req.Header.Set("User-Agent", "AniClew/1.0")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Sprintf("Fetch failed: %v", err), true
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	text := stripHTML(string(body))
-
-	// Clean up whitespace
-	text = regexp.MustCompile(`\s+`).ReplaceAllString(text, " ")
-	text = strings.TrimSpace(text)
-
-	if len(text) > 10000 {
-		text = text[:10000] + "\n... (truncated)"
-	}
-
-	result := fmt.Sprintf("Content from %s:\n\n%s", args.URL, text)
-	if args.Prompt != "" {
-		result = fmt.Sprintf("Prompt: %s\n\n%s", args.Prompt, result)
-	}
-	return result, false
-}
+// WebSearch and WebFetch are implemented in tool_web.go
 
 // ── Git ──
 
