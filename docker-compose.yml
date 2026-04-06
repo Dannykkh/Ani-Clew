@@ -16,22 +16,26 @@ services:
             - capabilities: [gpu]  # Remove if no GPU
     restart: unless-stopped
 
-  # ── Claude Code Proxy ──
-  proxy:
+  # ── AniClew: LLM Harness ──
+  aniclew:
     build: .
-    container_name: claude-proxy
+    container_name: aniclew
     ports:
       - "4000:4000"
+    volumes:
+      - aniclew-data:/root/.claude-proxy
+      - ./:/workspace  # Mount your project here
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
       # Add API keys as needed:
       # - OPENAI_API_KEY=sk-...
       # - GEMINI_API_KEY=AIza...
       # - ANTHROPIC_API_KEY=sk-ant-...
-    command: ["--provider", "ollama", "--model", "qwen3:8b", "--port", "4000", "--router"]
+    command: ["-provider", "ollama", "-model", "qwen3:14b", "-port", "4000"]
     depends_on:
       - ollama
     restart: unless-stopped
 
 volumes:
   ollama-models:
+  aniclew-data:

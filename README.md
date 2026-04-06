@@ -80,22 +80,60 @@ AniClew sits between your coding CLI tools and LLM providers, giving you multi-p
 - **Bridge mode**: HTTP remote control for IDE/script integration
 - **Session memory**: Disk-backed large result storage (saves tokens)
 
+## Installation
+
+### Option 1: Script (Mac/Linux)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Dannykkh/Ani-Clew/main/install.sh | bash
+```
+
+### Option 2: Docker
+
+```bash
+# With Ollama (local LLM)
+docker compose up -d
+
+# AniClew only (bring your own LLM)
+docker run -p 4000:4000 -v $(pwd):/workspace ghcr.io/dannykkh/aniclew
+```
+
+### Option 3: Build from source
+
+```bash
+git clone https://github.com/Dannykkh/Ani-Clew.git && cd Ani-Clew
+make all    # builds frontend + backend
+./aniclew   # interactive provider select
+```
+
+### Option 4: Download binary
+
+Go to [Releases](https://github.com/Dannykkh/Ani-Clew/releases) and download for your platform.
+
 ## Quick Start
 
 ```bash
-# Build
-cd web && npm install && npm run build && cd ..
-cp -r web/dist/* internal/server/webdist/
-go build -o aniclew ./cmd/proxy
-
-# Run
+# Start with Ollama (local, free)
 ./aniclew -provider ollama -model qwen3:14b
 
-# Connect CLI
-ANTHROPIC_BASE_URL=http://localhost:4000 claude
+# Start with OpenAI
+OPENAI_API_KEY=sk-... ./aniclew -provider openai -model gpt-4o
+
+# Start with Anthropic
+ANTHROPIC_API_KEY=sk-ant-... ./aniclew -provider anthropic -model claude-sonnet-4-6-20250217
 ```
 
 Browser opens at `http://localhost:4000/app`.
+
+### Connect your CLI tools
+
+```bash
+# Claude CLI → AniClew → any model
+ANTHROPIC_BASE_URL=http://localhost:4000 claude
+
+# Codex CLI → AniClew → any model
+OPENAI_BASE_URL=http://localhost:4000 codex
+```
 
 ## Configuration
 

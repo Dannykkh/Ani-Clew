@@ -5,49 +5,62 @@ set -e
 REPO="Dannykkh/Ani-Clew"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 
+echo "AniClew Installer"
+echo "=================="
+
 # Detect OS and arch
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
 
-case "$OS" in
-  linux)   SUFFIX="linux" ;;
-  darwin)  SUFFIX="mac" ;;
-  *)       echo "Unsupported OS: $OS"; exit 1 ;;
-esac
-
 case "$ARCH" in
-  x86_64|amd64) SUFFIX="$SUFFIX-amd64" ;;
-  aarch64|arm64) SUFFIX="$SUFFIX-arm64" ;;
+  x86_64|amd64) ARCH="amd64" ;;
+  aarch64|arm64) ARCH="arm64" ;;
   *)             echo "Unsupported arch: $ARCH"; exit 1 ;;
 esac
 
-if [ "$OS" = "darwin" ] && [ "$ARCH" = "x86_64" ]; then
-  SUFFIX="mac-intel"
+BINARY="aniclew-${OS}-${ARCH}"
+if [ "$OS" = "windows" ] || [ "$OS" = "mingw"* ]; then
+  BINARY="${BINARY}.exe"
 fi
 
-echo "Downloading AniClew for $OS/$ARCH..."
+echo "Platform: $OS/$ARCH"
+echo "Binary: $BINARY"
 
-# Get latest release URL
-LATEST=$(curl -sL "https://api.github.com/repos/$REPO/releases/latest" | grep "browser_download_url.*$SUFFIX" | head -1 | cut -d '"' -f 4)
+# Get latest release
+echo "Fetching latest release..."
+DOWNLOAD_URL=$(curl -sL "https://api.github.com/repos/$REPO/releases/latest" | grep "browser_download_url.*${OS}-${ARCH}" | head -1 | cut -d '"' -f 4)
 
-if [ -z "$LATEST" ]; then
-  echo "No release found for $SUFFIX. Building from source..."
-  echo "  git clone https://github.com/$REPO.git"
-  echo "  cd Ani-Clew && go build -o aniclew ./cmd/proxy/"
+if [ -z "$DOWNLOAD_URL" ]; then
+  echo ""
+  echo "No pre-built binary found. Building from source..."
+  echo ""
+  echo "  git clone https://github.com/$REPO.git && cd Ani-Clew"
+  echo "  cd web && npm install && npm run build && cd .."
+  echo "  cp -r web/dist/* internal/server/webdist/"
+  echo "  go build -o aniclew ./cmd/proxy"
+  echo ""
   exit 1
 fi
 
-curl -sL "$LATEST" -o aniclew
+echo "Downloading: $DOWNLOAD_URL"
+curl -sL "$DOWNLOAD_URL" -o aniclew
 chmod +x aniclew
 
 if [ -w "$INSTALL_DIR" ]; then
   mv aniclew "$INSTALL_DIR/aniclew"
-  echo "Installed to $INSTALL_DIR/aniclew"
 else
   sudo mv aniclew "$INSTALL_DIR/aniclew"
-  echo "Installed to $INSTALL_DIR/aniclew (sudo)"
 fi
 
 echo ""
-echo "Run: aniclew"
+echo "Installed: $INSTALL_DIR/aniclew"
+echo ""
+echo "Quick start:"
+echo "  aniclew                              # interactive provider select"
+echo "  aniclew -provider ollama -model qwen3:14b  # direct start"
+echo ""
 echo "Web UI: http://localhost:4000/app"
+echo ""
+echo "Connect CLI tools:"
+echo "  ANTHROPIC_BASE_URL=http://localhost:4000 claude"
+echo "  OPENAI_BASE_URL=http://localhost:4000 codex"
